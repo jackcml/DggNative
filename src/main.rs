@@ -1,27 +1,19 @@
-//! We will connect to a server specified in the argument list and
-//! then forward all data read on stdin to the server, printing out all data
-//! received on stdout.
-
 use std::env;
 
-use futures_util::{future, pin_mut, StreamExt};
+use futures_util::{pin_mut, StreamExt};
 use rustls::RootCertStore;
 use rustls_native_certs::load_native_certs;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::protocol::Message, Connector};
+use tokio::io::AsyncWriteExt;
+use tokio::signal;
+use tokio_tungstenite::{connect_async_tls_with_config, Connector};
 
 #[tokio::main]
 async fn main() {
-    let url = env::args()
-        .nth(1)
-        .unwrap_or_else(|| panic!("this program requires at least one argument"));
-
-    let (stdin_tx, stdin_rx) = futures_channel::mpsc::unbounded();
-    tokio::spawn(read_stdin(stdin_tx));
+    let url = env::var("DGG_WS_URL").unwrap_or_else(|_| "wss://chat.destiny.gg/ws".to_string());
 
     let mut root_store = RootCertStore::empty();
     let native_certs = load_native_certs().certs;
-    if native_certs.len() == 0 {
+    if native_certs.is_empty() {
         panic!("unable to load native certificates");
     }
     root_store.add_parsable_certificates(native_certs);
@@ -37,9 +29,7 @@ async fn main() {
         .expect("Failed to connect");
     println!("WebSocket handshake has been successfully completed");
 
-    let (write, read) = ws_stream.split();
-
-    let stdin_to_ws = stdin_rx.map(Ok).forward(write);
+    let (_, read) = ws_stream.split();
     let ws_to_stdout = {
         read.for_each(|message| async {
             let data = message.unwrap().into_data();
@@ -47,20 +37,15 @@ async fn main() {
         })
     };
 
-    pin_mut!(stdin_to_ws, ws_to_stdout);
-    future::select(stdin_to_ws, ws_to_stdout).await;
-}
+    let ctrl_c = signal::ctrl_c();
+    pin_mut!(ws_to_stdout, ctrl_c);
 
-// Helper method which will read data from stdin and send it along the sender provided.
-async fn read_stdin(tx: futures_channel::mpsc::UnboundedSender<Message>) {
-    let mut stdin = tokio::io::stdin();
-    loop {
-        let mut buf = vec![0; 1024];
-        let n = match stdin.read(&mut buf).await {
-            Err(_) | Ok(0) => break,
-            Ok(n) => n,
-        };
-        buf.truncate(n);
-        tx.unbounded_send(Message::binary(buf)).unwrap();
+    tokio::select! {
+        _ = ws_to_stdout => {
+            println!("Disconnected.");
+        },
+        _ = ctrl_c => {
+            println!("Recieved Ctrl+C, disconnecting...");
+        },
     }
 }
