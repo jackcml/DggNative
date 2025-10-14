@@ -55,13 +55,14 @@ async fn message_handler(
     chat: &Chat,
 ) {
     let data = match message {
-        Ok(msg) => msg.into_data(),
+        Ok(Message::Text(text)) => text,
+        Ok(_) => return, // We ignore non-textual messages since the chat protocol doesn't use them
         Err(e) => {
             eprintln!("WebSocket error: {}", e);
             return;
         }
     };
-    let message_str = String::from_utf8_lossy(&data);
+    let message_str = String::from_utf8_lossy(data.as_bytes());
 
     // Split message into type and JSON data
     let space_pos = match message_str.find(' ') {

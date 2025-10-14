@@ -1,3 +1,6 @@
+use std::env;
+
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Debug)]
@@ -36,6 +39,7 @@ pub enum MessageType {
     RemovePhrase,
     Death,
     PaidEvents,
+    Join,
 }
 
 impl MessageType {
@@ -75,9 +79,29 @@ impl MessageType {
             "REMOVEPHRASE" => Some(MessageType::RemovePhrase),
             "DEATH" => Some(MessageType::Death),
             "PAIDEVENTS" => Some(MessageType::PaidEvents),
+            "JOIN" => Some(MessageType::Join),
             _ => None,
         }
     }
+}
+
+#[derive(Serialize, Deserialize)]
+struct Watching {
+    platform: String,
+    id: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Msg {
+    id: f64,
+    nick: String,
+    roles: Vec<String>,
+    features: Vec<String>,
+    created_date: String,
+    watching: Watching,
+    timestamp: f64,
+    data: String,
 }
 
 pub struct Chat {}
@@ -86,10 +110,22 @@ impl Chat {
         Chat {}
     }
 
-    pub async fn recieve_msg(&self, msg_type: MessageType, _json: Value) {
+    pub async fn recieve_msg(&self, msg_type: MessageType, json: Value) {
         match msg_type {
+            MessageType::Msg => {
+                let msg = match serde_json::from_value::<Msg>(json) {
+                    Ok(msg) => msg,
+                    Err(e) => {
+                        eprintln!("Malformed JSON for MSG: {}", e);
+                        return;
+                    }
+                };
+                println!("{}: {}", msg.nick, msg.data);
+            }
             _ => {
-                eprintln!("recieve_msg not yet implemented for type: {:?}", msg_type);
+                if env::var("DEBUG").is_ok() {
+                    eprintln!("recieve_msg not yet implemented for type: {:?}", msg_type);
+                }
             }
         }
     }
