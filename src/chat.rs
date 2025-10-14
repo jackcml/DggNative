@@ -1,7 +1,7 @@
-use std::env;
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+use crate::Frontend;
 
 #[derive(Debug)]
 pub enum MessageType {
@@ -86,31 +86,33 @@ impl MessageType {
 }
 
 #[derive(Serialize, Deserialize)]
-struct Watching {
-    platform: String,
-    id: String,
+pub struct Watching {
+    pub platform: String,
+    pub id: String,
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct Msg {
-    id: f64,
-    nick: String,
-    roles: Vec<String>,
-    features: Vec<String>,
-    created_date: String,
-    watching: Watching,
-    timestamp: f64,
-    data: String,
+pub struct Msg {
+    pub id: f64,
+    pub nick: String,
+    pub roles: Vec<String>,
+    pub features: Vec<String>,
+    pub created_date: String,
+    pub watching: Watching,
+    pub timestamp: f64,
+    pub data: String,
 }
 
-pub struct Chat {}
+pub struct Chat {
+    debug: bool,
+}
 impl Chat {
-    pub fn new() -> Self {
-        Chat {}
+    pub fn new(debug: bool) -> Self {
+        Chat { debug }
     }
 
-    pub async fn recieve_msg(&self, msg_type: MessageType, json: Value) {
+    pub async fn recieve_msg(&self, msg_type: MessageType, json: Value, frontend: &impl Frontend) {
         match msg_type {
             MessageType::Msg => {
                 let msg = match serde_json::from_value::<Msg>(json) {
@@ -120,10 +122,10 @@ impl Chat {
                         return;
                     }
                 };
-                println!("{}: {}", msg.nick, msg.data);
+                frontend.new_msg(msg);
             }
             _ => {
-                if env::var("DEBUG").is_ok() {
+                if self.debug {
                     eprintln!("recieve_msg not yet implemented for type: {:?}", msg_type);
                 }
             }
