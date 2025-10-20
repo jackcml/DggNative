@@ -21,4 +21,13 @@ impl Frontend for Tui {
     fn new_msg(&self, msg: Msg) {
         println!("{}: {}", msg.user.nick.bold(), msg.data);
     }
+
+    fn new_pin(&self, msg: &Msg) {
+        println!(
+            "{} ({}): {}",
+            "MOTD".bold().bright_red(),
+            msg.user.nick.bold(),
+            msg.data.bold()
+        )
+    }
 }

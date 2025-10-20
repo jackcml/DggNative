@@ -85,13 +85,13 @@ impl MessageType {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Watching {
     pub platform: String,
     pub id: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct User {
     pub id: f64,
@@ -102,7 +102,7 @@ pub struct User {
     pub watching: Option<Watching>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Msg {
     #[serde(flatten)]
@@ -113,12 +113,17 @@ pub struct Msg {
 
 pub struct Chat {
     user: Option<User>,
+    pin: Option<Msg>,
     debug: bool,
 }
 
 impl Chat {
     pub fn new(debug: bool) -> Self {
-        Chat { user: None, debug }
+        Chat {
+            user: None,
+            pin: None,
+            debug,
+        }
     }
 
     pub async fn recieve_msg(
@@ -143,6 +148,18 @@ impl Chat {
                     };
                 }
                 frontend.connected_as(&self.user);
+            }
+            MessageType::Pin => {
+                // TODO: How are pins removed? Would we recieve `PIN null`?
+                let msg = match serde_json::from_value::<Msg>(json) {
+                    Ok(msg) => msg,
+                    Err(e) => {
+                        eprintln!("Malformed JSON for PIN: {}", e);
+                        return;
+                    }
+                };
+                self.pin = Some(msg.clone());
+                frontend.new_pin(&msg);
             }
             MessageType::Msg => {
                 let msg = match serde_json::from_value::<Msg>(json) {
