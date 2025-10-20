@@ -33,9 +33,9 @@ struct Args {
 async fn main() {
     let args = Args::parse();
 
-    let chat = &Chat::new(args.debug);
+    let chat = &mut Chat::new(args.debug);
     let frontend = match args.frontend.as_str() {
-        "tui" => &tui::Tui {},
+        "tui" => &tui::Tui { debug: args.debug },
         other => {
             eprintln!("Unknown frontend '{}'.", other);
             return;
@@ -60,14 +60,17 @@ async fn main() {
         .expect("Failed to connect");
     println!("WebSocket handshake has been successfully completed");
 
-    let (_, read) = ws_stream.split();
-    let ws_to_message_handler = read.for_each(|msg| message_handler(msg, chat, frontend));
+    let (_, mut read) = ws_stream.split();
 
     let ctrl_c = signal::ctrl_c();
-    pin_mut!(ws_to_message_handler, ctrl_c);
+    pin_mut!(ctrl_c);
 
     tokio::select! {
-        _ = ws_to_message_handler => {
+        _ = async {
+            while let Some(msg) = read.next().await {
+                message_handler(msg, chat, frontend).await;
+            }
+        } => {
             println!("Disconnected.");
         },
         _ = ctrl_c => {
@@ -78,7 +81,7 @@ async fn main() {
 
 async fn message_handler(
     message: Result<Message, tokio_tungstenite::tungstenite::Error>,
-    chat: &Chat,
+    chat: &mut Chat,
     frontend: &impl Frontend,
 ) {
     let data = match message {

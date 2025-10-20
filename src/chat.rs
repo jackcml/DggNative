@@ -93,27 +93,57 @@ pub struct Watching {
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Msg {
+pub struct User {
     pub id: f64,
     pub nick: String,
     pub roles: Vec<String>,
     pub features: Vec<String>,
     pub created_date: String,
-    pub watching: Watching,
+    pub watching: Option<Watching>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Msg {
+    #[serde(flatten)]
+    pub user: User,
     pub timestamp: f64,
     pub data: String,
 }
 
 pub struct Chat {
+    user: Option<User>,
     debug: bool,
 }
+
 impl Chat {
     pub fn new(debug: bool) -> Self {
-        Chat { debug }
+        Chat { user: None, debug }
     }
 
-    pub async fn recieve_msg(&self, msg_type: MessageType, json: Value, frontend: &impl Frontend) {
+    pub async fn recieve_msg(
+        &mut self,
+        msg_type: MessageType,
+        json: Value,
+        frontend: &impl Frontend,
+    ) {
         match msg_type {
+            /* Sent on connection open */
+            MessageType::Me => {
+                /* If not logged in, value of ME is null. */
+                if !json.is_null() {
+                    self.user = None;
+                } else {
+                    self.user = match serde_json::from_value::<User>(json) {
+                        Ok(me) => Some(me),
+                        Err(e) => {
+                            eprintln!("Malformed JSON for ME: {}", e);
+                            None
+                        }
+                    };
+                }
+                frontend.connected_as(&self.user);
+            }
             MessageType::Msg => {
                 let msg = match serde_json::from_value::<Msg>(json) {
                     Ok(msg) => msg,
