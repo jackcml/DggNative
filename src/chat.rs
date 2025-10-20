@@ -131,7 +131,7 @@ impl Chat {
             /* Sent on connection open */
             MessageType::Me => {
                 /* If not logged in, value of ME is null. */
-                if !json.is_null() {
+                if json.is_null() {
                     self.user = None;
                 } else {
                     self.user = match serde_json::from_value::<User>(json) {
