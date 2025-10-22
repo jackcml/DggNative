@@ -216,6 +216,12 @@ impl Chat {
                 };
                 self.users.insert(msg.user.id, msg.user);
             }
+            MessageType::UpdateUser => {
+                let Some(msg) = self.deserialize_json::<User>(json, msg_type) else {
+                    return;
+                };
+                self.users.insert(msg.id, msg);
+            }
             MessageType::Quit => {
                 let Some(msg) = self.deserialize_json::<JoinOrQuit>(json, msg_type) else {
                     return;
