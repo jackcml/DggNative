@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use crate::Frontend;
 
@@ -95,7 +95,7 @@ pub struct Watching {
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct User {
-    pub id: f64,
+    pub id: u64,
     pub nick: String,
     pub roles: Vec<String>,
     pub features: Vec<String>,
@@ -108,6 +108,13 @@ pub struct Names {
     #[serde(rename = "connectioncount")]
     connection_count: usize,
     users: Vec<User>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct JoinOrQuit {
+    #[serde(flatten)]
+    pub user: User,
+    timestamp: f64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -125,7 +132,7 @@ pub struct Chat {
     debug: bool,
     history_len: usize,
     history: VecDeque<Msg>,
-    users: Vec<User>,
+    users: HashMap<u64, User>,
 }
 
 impl Chat {
@@ -136,7 +143,7 @@ impl Chat {
             debug,
             history_len,
             history: VecDeque::new(),
-            users: Vec::new(),
+            users: HashMap::new(),
         }
     }
 
@@ -196,10 +203,30 @@ impl Chat {
                     }
                 };
                 // chat.users is currently unused, but will be useful for name autocomplete and bringing up user info
-                self.users = msg.users;
+                self.users = msg.users.into_iter().map(|user| (user.id, user)).collect();
                 if self.debug {
                     println!("Serving {} connections.", msg.connection_count);
                 }
+            }
+            MessageType::Join => {
+                let msg = match serde_json::from_value::<JoinOrQuit>(json) {
+                    Ok(msg) => msg,
+                    Err(e) => {
+                        eprintln!("Malformed JSON for JOIN: {}", e);
+                        return;
+                    }
+                };
+                self.users.insert(msg.user.id, msg.user);
+            }
+            MessageType::Quit => {
+                let msg = match serde_json::from_value::<JoinOrQuit>(json) {
+                    Ok(msg) => msg,
+                    Err(e) => {
+                        eprintln!("Malformed JSON for QUIT: {}", e);
+                        return;
+                    }
+                };
+                self.users.remove(&msg.user.id);
             }
             MessageType::Pin => {
                 // TODO: How are pins removed? Would we recieve `PIN null`?
