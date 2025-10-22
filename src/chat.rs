@@ -4,54 +4,69 @@ use std::collections::{HashMap, VecDeque};
 
 use crate::Frontend;
 
+// MessageTypes that all clients can send:
+// - MSG, PING, PONG, PRIVMSG, DIE, CASTVOTE
+// User clients can send, but server will reply with ERR(nopermission):
+// - MUTE, UNMUTE, BAN, UNBAN, SUBONLY, BROADCAST, RELOADUSERS, PIN
+// Permission checked client side (ADMIN, MODERATOR, BOT):
+// - STARTPOLL, STOPPOLL
+// Permission checked client side (ADMIN, MODERATOR):
+// - ADDPHRASE, REMOVEPHRASE
+// - Action taken through GUI: REMOVEEVENT
+
 #[derive(Debug)]
 pub enum MessageType {
+    // Types handled by available chat server implementation (last updated 2022)
+    Join,        // User joins
+    Quit,        // User leaves
+    Broadcast,   // Special message type, highlighted
+    Msg,         // Chat message
+    Mute,        // Mute info, for self or another user
+    Unmute,      // Unmute info, for self or another user
+    Ban,         // Ban info, for self or another user
+    Unban,       // Unban info, for self or another user
+    SubOnly, // Indicates change in subonly mode: data.data == "on" if enabled, otherwise disabled
+    Err,     // Communicates errors: toomanyconnections, banned, muted, bannedphrase, nopermission
+    PrivMsg, // Private message recieved
+    PrivMsgSent, // Private message sent successfully
+    Names,   // Lists current connected users
     Ping,
-    Connecting,
-    Me,
-    Open,
-    Dispatch,
-    Close,
-    Names,
-    History,
-    Pin,
-    Quit,
-    Msg,
-    Mute,
-    Unmute,
-    Ban,
-    Unban,
-    Err,
-    SocketError,
-    SubOnly,
-    Broadcast,
-    Reload,
-    PrivMsgSent,
-    PrivMsg,
+    Pong,
+    // Refresh: No longer used; see destinygg/chat-gui commit 1c7f9cf.
+
+    // Other types observed
+    Me,         // Provides current logged-in user
+    History,    // History of recent chat messages
+    Pin,        // Pinned message
+    UpdateUser, // Provides updated information about a user by id (since username can change)
+
+    // Other types handled by the current JS chat client
+    Reload, // Forces client reload, likely used for live chat client updates, so may not apply to us.
+
+    // Polling
     PollStart,
     PollStop,
     VoteCast,
+
+    // Event bar
     Subscription,
     GiftSub,
     MassGift,
     Donation,
-    UpdateUser,
-    AddPhrase,
-    RemovePhrase,
-    Death,
-    PaidEvents,
-    Join,
+    PaidEvents, // Like History but for currently displayed paid events
+
+    AddPhrase,    // Add a banned phrase to chat
+    RemovePhrase, // Remove a banned phrase from chat
+
+    Death, // Messages sent when users /die
 }
 
 impl MessageType {
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "PING" => Some(MessageType::Ping),
-            "CONNECTING" => Some(MessageType::Connecting),
+            "PONG" => Some(MessageType::Pong),
             "ME" => Some(MessageType::Me),
-            "OPEN" => Some(MessageType::Open),
-            "DISPATCH" => Some(MessageType::Dispatch),
-            "CLOSE" => Some(MessageType::Close),
             "NAMES" => Some(MessageType::Names),
             "HISTORY" => Some(MessageType::History),
             "PIN" => Some(MessageType::Pin),
@@ -62,7 +77,6 @@ impl MessageType {
             "BAN" => Some(MessageType::Ban),
             "UNBAN" => Some(MessageType::Unban),
             "ERR" => Some(MessageType::Err),
-            "SOCKETERROR" => Some(MessageType::SocketError),
             "SUBONLY" => Some(MessageType::SubOnly),
             "BROADCAST" => Some(MessageType::Broadcast),
             "RELOAD" => Some(MessageType::Reload),
