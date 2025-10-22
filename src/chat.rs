@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::VecDeque;
 
 use crate::Frontend;
 
@@ -115,15 +116,26 @@ pub struct Chat {
     user: Option<User>,
     pin: Option<Msg>,
     debug: bool,
+    history_len: usize,
+    history: VecDeque<Msg>,
 }
 
 impl Chat {
-    pub fn new(debug: bool) -> Self {
+    pub fn new(debug: bool, history_len: usize) -> Self {
         Chat {
             user: None,
             pin: None,
             debug,
+            history_len,
+            history: VecDeque::new(),
         }
+    }
+
+    fn history_add(&mut self, msg: Msg) {
+        if self.history.len() >= self.history_len {
+            self.history.pop_front();
+        }
+        self.history.push_back(msg);
     }
 
     pub async fn recieve_msg(
@@ -149,6 +161,23 @@ impl Chat {
                 }
                 frontend.connected_as(&self.user);
             }
+            MessageType::History => {
+                let back_history: Vec<String> = match serde_json::from_value(json) {
+                    Ok(x) => x,
+                    Err(e) => {
+                        eprintln!("Malformed JSON for HISTORY: {}", e);
+                        return;
+                    }
+                };
+
+                for msg_str in back_history {
+                    // Parse each historical message string and process it
+                    if let Some((msg_type, json_data)) = parse_message_string(&msg_str) {
+                        // Recursion in async fn requires boxing
+                        Box::pin(self.recieve_msg(msg_type, json_data, frontend)).await;
+                    }
+                }
+            }
             MessageType::Pin => {
                 // TODO: How are pins removed? Would we recieve `PIN null`?
                 let msg = match serde_json::from_value::<Msg>(json) {
@@ -169,6 +198,7 @@ impl Chat {
                         return;
                     }
                 };
+                self.history_add(msg.clone());
                 frontend.new_msg(msg);
             }
             _ => {
@@ -178,4 +208,42 @@ impl Chat {
             }
         }
     }
+}
+
+/// Parses a message string into (MessageType, JSON Value)
+/// Returns None if parsing fails
+pub fn parse_message_string(message_str: &str) -> Option<(MessageType, Value)> {
+    // Split message into type and JSON data
+    let space_pos = match message_str.find(' ') {
+        Some(pos) => pos,
+        None => {
+            eprintln!("Invalid message format.");
+            eprintln!("Raw message: {}", message_str);
+            return None;
+        }
+    };
+
+    // Parse message type to enum
+    let msg_type_str = &message_str[..space_pos];
+    let msg_type = match MessageType::from_str(msg_type_str) {
+        Some(msg_type) => msg_type,
+        None => {
+            eprintln!("Unknown message type: {}", msg_type_str);
+            eprintln!("Raw message: {}", message_str);
+            return None;
+        }
+    };
+
+    // Parse JSON data
+    let json_str = &message_str[space_pos + 1..];
+    let json_data = match serde_json::from_str::<Value>(json_str) {
+        Ok(data) => data,
+        Err(e) => {
+            eprintln!("Failed to parse JSON: {}", e);
+            eprintln!("Raw message: {}", message_str);
+            return None;
+        }
+    };
+
+    Some((msg_type, json_data))
 }

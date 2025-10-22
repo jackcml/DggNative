@@ -6,11 +6,11 @@ use clap::Parser;
 use futures_util::{pin_mut, StreamExt};
 use rustls::RootCertStore;
 use rustls_native_certs::load_native_certs;
-use serde_json::Value;
+
 use tokio::signal;
 use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::protocol::Message, Connector};
 
-use crate::chat::{Chat, MessageType};
+use crate::chat::{parse_message_string, Chat};
 use crate::frontend::Frontend;
 
 #[derive(Parser)]
@@ -27,13 +27,17 @@ struct Args {
     /// Enables debug printing
     #[arg(short, long)]
     debug: bool,
+
+    /// Maximum length of chat history
+    #[arg(long, default_value_t = 250)]
+    history: usize,
 }
 
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
 
-    let chat = &mut Chat::new(args.debug);
+    let chat = &mut Chat::new(args.debug, args.history);
     let frontend = match args.frontend.as_str() {
         "tui" => &tui::Tui { debug: args.debug },
         other => {
@@ -94,38 +98,8 @@ async fn message_handler(
     };
     let message_str = String::from_utf8_lossy(data.as_bytes());
 
-    // Split message into type and JSON data
-    let space_pos = match message_str.find(' ') {
-        Some(pos) => pos,
-        None => {
-            eprintln!("Invalid message format.");
-            eprintln!("Raw message: {}", message_str);
-            return;
-        }
-    };
-
-    // Parse message type to enum
-    let msg_type_str = &message_str[..space_pos];
-    let msg_type = match MessageType::from_str(msg_type_str) {
-        Some(msg_type) => msg_type,
-        None => {
-            eprintln!("Unknown message type: {}", msg_type_str);
-            eprintln!("Raw message: {}", message_str);
-            return;
-        }
-    };
-
-    // Parse JSON data
-    let json_str = &message_str[space_pos + 1..];
-    let json_data = match serde_json::from_str::<Value>(json_str) {
-        Ok(data) => data,
-        Err(e) => {
-            eprintln!("Failed to parse JSON: {}", e);
-            eprintln!("Raw message: {}", message_str);
-            return;
-        }
-    };
-
-    // Success case: pass JSON onto handler for given message type
-    chat.recieve_msg(msg_type, json_data, frontend).await;
+    if let Some((msg_type, json_data)) = parse_message_string(&message_str) {
+        // Success case: pass JSON onto handler for given message type
+        chat.recieve_msg(msg_type, json_data, frontend).await;
+    }
 }
