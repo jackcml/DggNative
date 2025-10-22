@@ -154,6 +154,21 @@ impl Chat {
         self.history.push_back(msg);
     }
 
+    /// Helper method to deserialize JSON with consistent error handling
+    fn deserialize_json<T: serde::de::DeserializeOwned>(
+        &self,
+        json: Value,
+        msg_type: MessageType,
+    ) -> Option<T> {
+        match serde_json::from_value::<T>(json) {
+            Ok(msg) => Some(msg),
+            Err(e) => {
+                eprintln!("Malformed JSON for {:?}: {}", msg_type, e);
+                None
+            }
+        }
+    }
+
     pub async fn recieve_msg(
         &mut self,
         msg_type: MessageType,
@@ -167,23 +182,14 @@ impl Chat {
                 if json.is_null() {
                     self.user = None;
                 } else {
-                    self.user = match serde_json::from_value::<User>(json) {
-                        Ok(me) => Some(me),
-                        Err(e) => {
-                            eprintln!("Malformed JSON for ME: {}", e);
-                            None
-                        }
-                    };
+                    self.user = self.deserialize_json::<User>(json, msg_type);
                 }
                 frontend.connected_as(&self.user);
             }
             MessageType::History => {
-                let back_history: Vec<String> = match serde_json::from_value(json) {
-                    Ok(x) => x,
-                    Err(e) => {
-                        eprintln!("Malformed JSON for HISTORY: {}", e);
-                        return;
-                    }
+                let Some(back_history) = self.deserialize_json::<Vec<String>>(json, msg_type)
+                else {
+                    return;
                 };
 
                 for msg_str in back_history {
@@ -195,12 +201,8 @@ impl Chat {
                 }
             }
             MessageType::Names => {
-                let msg = match serde_json::from_value::<Names>(json) {
-                    Ok(msg) => msg,
-                    Err(e) => {
-                        eprintln!("Malformed JSON for NAMES: {}", e);
-                        return;
-                    }
+                let Some(msg) = self.deserialize_json::<Names>(json, msg_type) else {
+                    return;
                 };
                 // chat.users is currently unused, but will be useful for name autocomplete and bringing up user info
                 self.users = msg.users.into_iter().map(|user| (user.id, user)).collect();
@@ -209,44 +211,28 @@ impl Chat {
                 }
             }
             MessageType::Join => {
-                let msg = match serde_json::from_value::<JoinOrQuit>(json) {
-                    Ok(msg) => msg,
-                    Err(e) => {
-                        eprintln!("Malformed JSON for JOIN: {}", e);
-                        return;
-                    }
+                let Some(msg) = self.deserialize_json::<JoinOrQuit>(json, msg_type) else {
+                    return;
                 };
                 self.users.insert(msg.user.id, msg.user);
             }
             MessageType::Quit => {
-                let msg = match serde_json::from_value::<JoinOrQuit>(json) {
-                    Ok(msg) => msg,
-                    Err(e) => {
-                        eprintln!("Malformed JSON for QUIT: {}", e);
-                        return;
-                    }
+                let Some(msg) = self.deserialize_json::<JoinOrQuit>(json, msg_type) else {
+                    return;
                 };
                 self.users.remove(&msg.user.id);
             }
             MessageType::Pin => {
                 // TODO: How are pins removed? Would we recieve `PIN null`?
-                let msg = match serde_json::from_value::<Msg>(json) {
-                    Ok(msg) => msg,
-                    Err(e) => {
-                        eprintln!("Malformed JSON for PIN: {}", e);
-                        return;
-                    }
+                let Some(msg) = self.deserialize_json::<Msg>(json, msg_type) else {
+                    return;
                 };
                 self.pin = Some(msg.clone());
                 frontend.new_pin(&msg);
             }
             MessageType::Msg => {
-                let msg = match serde_json::from_value::<Msg>(json) {
-                    Ok(msg) => msg,
-                    Err(e) => {
-                        eprintln!("Malformed JSON for MSG: {}", e);
-                        return;
-                    }
+                let Some(msg) = self.deserialize_json::<Msg>(json, msg_type) else {
+                    return;
                 };
                 self.history_add(msg.clone());
                 frontend.new_msg(msg);
