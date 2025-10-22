@@ -103,6 +103,13 @@ pub struct User {
     pub watching: Option<Watching>,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct Names {
+    #[serde(rename = "connectioncount")]
+    connection_count: usize,
+    users: Vec<User>,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Msg {
@@ -118,6 +125,7 @@ pub struct Chat {
     debug: bool,
     history_len: usize,
     history: VecDeque<Msg>,
+    users: Vec<User>,
 }
 
 impl Chat {
@@ -128,6 +136,7 @@ impl Chat {
             debug,
             history_len,
             history: VecDeque::new(),
+            users: Vec::new(),
         }
     }
 
@@ -176,6 +185,20 @@ impl Chat {
                         // Recursion in async fn requires boxing
                         Box::pin(self.recieve_msg(msg_type, json_data, frontend)).await;
                     }
+                }
+            }
+            MessageType::Names => {
+                let msg = match serde_json::from_value::<Names>(json) {
+                    Ok(msg) => msg,
+                    Err(e) => {
+                        eprintln!("Malformed JSON for NAMES: {}", e);
+                        return;
+                    }
+                };
+                // chat.users is currently unused, but will be useful for name autocomplete and bringing up user info
+                self.users = msg.users;
+                if self.debug {
+                    println!("Serving {} connections.", msg.connection_count);
                 }
             }
             MessageType::Pin => {
