@@ -18,6 +18,8 @@ public static class WebSocketMessageFactory
                 return JsonSerializer.Deserialize<QuitMessage>(ref reader);
             case "UPDATEUSER":
                 return JsonSerializer.Deserialize<UpdateUserMessage>(ref reader);
+            case "HISTORY":
+                return JsonSerializer.Deserialize<HistoryMessage>(ref reader);
             default:
                 Console.WriteLine($"Unsupported message type `{messageType}`.");
                 return null;
