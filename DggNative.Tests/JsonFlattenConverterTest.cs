@@ -163,4 +163,56 @@ public class JsonFlattenConverterTest
         var actual = JsonSerializer.Serialize(obj);
         Assert.Equivalent(expected, actual);
     }
+    
+    [Fact]
+    public void DeserializationTestQuitMessage()
+    {
+        const string json = """{"id":176456,"nick":"Sivulus","roles":["USER"],"features":[],"createdDate":"2023-01-15T19:36:05Z","watching":{"platform":"kick","id":"pizzaw"},"subscription":null,"timestamp":1763073298962}""";
+        var expected = new QuitMessage()
+        {
+            User = new User()
+            {
+                Id = 176456,
+                Nick = "Sivulus",
+                Roles = ["USER"],
+                Features = [],
+                CreatedDate = "2023-01-15T19:36:05Z",
+                Watching = new Watching()
+                {
+                    Platform = "kick",
+                    Id = "pizzaw"
+                }
+            },
+            Timestamp = 1763073298962
+        };
+        
+        var actual = JsonSerializer.Deserialize<QuitMessage>(json);
+        Assert.Equivalent(expected, actual);
+    }
+    
+    
+    [Fact]
+    public void SerializationTestQuitMessage()
+    {
+        var obj = new QuitMessage()
+        {
+            User = new User()
+            {
+                Id = 176456,
+                Nick = "Sivulus",
+                Roles = ["USER"],
+                Features = [],
+                CreatedDate = "2023-01-15T19:36:05Z",
+                Watching = new Watching()
+                {
+                    Platform = "kick",
+                    Id = "pizzaw"
+                }
+            },
+            Timestamp = 1763073298962
+        };
+        const string expected = """{"id":176456,"nick":"Sivulus","roles":["USER"],"features":[],"createdDate":"2023-01-15T19:36:05Z","watching":{"platform":"kick","id":"pizzaw"},"subscription":null,"timestamp":1763073298962}""";
+        var actual = JsonSerializer.Serialize(obj);
+        Assert.Equivalent(expected, actual);
+    }
 }

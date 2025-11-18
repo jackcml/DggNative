@@ -14,6 +14,8 @@ public static class WebSocketMessageFactory
                 return JsonSerializer.Deserialize<ChatMessage>(ref reader);
             case "JOIN":
                 return JsonSerializer.Deserialize<JoinMessage>(ref reader);
+            case "QUIT":
+                return JsonSerializer.Deserialize<QuitMessage>(ref reader);
             default:
                 Console.WriteLine($"Unsupported message type `{messageType}`.");
                 return null;
