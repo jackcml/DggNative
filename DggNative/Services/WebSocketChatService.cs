@@ -5,8 +5,9 @@ using System.Threading.Tasks;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Text;
+using DggNative.Models;
 
-namespace DggNative.Models;
+namespace DggNative.Services;
 
 public class WebSocketChatService(Uri serverUri) : IChatService, IDisposable
 {

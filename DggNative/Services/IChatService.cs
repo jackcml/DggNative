@@ -1,8 +1,9 @@
 ﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
+using DggNative.Models;
 
-namespace DggNative.Models;
+namespace DggNative.Services;
 
 public interface IChatService
 {
