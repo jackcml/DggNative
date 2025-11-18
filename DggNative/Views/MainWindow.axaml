@@ -15,6 +15,16 @@
         <vm:MainWindowViewModel/>
     </Design.DataContext>
 
-    <TextBlock Text="{Binding Greeting}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-
+    <ScrollViewer>
+        <ItemsControl ItemsSource="{Binding MessageList}">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <TextBlock Padding="1.4 8.4 1.4 4.2" TextWrapping="Wrap">
+                        <Run Text="{Binding User.Nick}" FontWeight="500" /><Run Text=":" />
+                        <Run Text="{Binding Data}"></Run>
+                    </TextBlock>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+    </ScrollViewer>
 </Window>

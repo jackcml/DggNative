@@ -1,9 +1,10 @@
+using System;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia.Data.Core;
 using Avalonia.Data.Core.Plugins;
 using System.Linq;
 using Avalonia.Markup.Xaml;
+using DggNative.Services;
 using DggNative.ViewModels;
 using DggNative.Views;
 
@@ -25,7 +26,8 @@ public partial class App : Application
             DisableAvaloniaDataAnnotationValidation();
             desktop.MainWindow = new MainWindow
             {
-                DataContext = new MainWindowViewModel(),
+                // NOTE: Hardcoded development server endpoint
+                DataContext = new MainWindowViewModel(new WebSocketChatService(new Uri("ws://localhost:8080"))),
             };
         }
 
