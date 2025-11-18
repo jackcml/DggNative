@@ -215,4 +215,54 @@ public class JsonFlattenConverterTest
         var actual = JsonSerializer.Serialize(obj);
         Assert.Equivalent(expected, actual);
     }
+    
+    [Fact]
+    public void DeserializationTestUpdateUserMessage()
+    {
+        const string json = """{"id":176456,"nick":"Sivulus","roles":["USER"],"features":[],"createdDate":"2023-01-15T19:36:05Z","watching":{"platform":"kick","id":"pizzaw"},"subscription":null}""";
+        var expected = new UpdateUserMessage()
+        {
+            User = new User()
+            {
+                Id = 176456,
+                Nick = "Sivulus",
+                Roles = ["USER"],
+                Features = [],
+                CreatedDate = "2023-01-15T19:36:05Z",
+                Watching = new Watching()
+                {
+                    Platform = "kick",
+                    Id = "pizzaw"
+                }
+            }
+        };
+        
+        var actual = JsonSerializer.Deserialize<UpdateUserMessage>(json);
+        Assert.Equivalent(expected, actual);
+    }
+    
+    
+    [Fact]
+    public void SerializationTestUpdateUserMessage()
+    {
+        var obj = new UpdateUserMessage()
+        {
+            User = new User()
+            {
+                Id = 176456,
+                Nick = "Sivulus",
+                Roles = ["USER"],
+                Features = [],
+                CreatedDate = "2023-01-15T19:36:05Z",
+                Watching = new Watching()
+                {
+                    Platform = "kick",
+                    Id = "pizzaw"
+                }
+            }
+        };
+        const string expected = """{"id":176456,"nick":"Sivulus","roles":["USER"],"features":[],"createdDate":"2023-01-15T19:36:05Z","watching":{"platform":"kick","id":"pizzaw"},"subscription":null}""";
+        var actual = JsonSerializer.Serialize(obj);
+        Assert.Equivalent(expected, actual);
+    }
 }
