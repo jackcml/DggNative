@@ -69,14 +69,6 @@ public class JsonFlattenConverter<T> : JsonConverter<T> where T : class
             p => p.GetCustomAttribute<JsonFlattenAttribute>() != null).ToList();
         var normalProps = props.Except(flattenProps).ToList();
         
-        // Write normal props
-        foreach (var prop in normalProps)
-        {
-            var propValue =  prop.GetValue(value);
-            writer.WritePropertyName(GetJsonPropertyName(prop));
-            JsonSerializer.Serialize(writer, propValue, prop.PropertyType, options);
-        }
-        
         // Write flattened props
         // ReSharper disable once ForeachCanBePartlyConvertedToQueryUsingAnotherGetEnumerator
         foreach (var flatProp in flattenProps)
@@ -90,6 +82,16 @@ public class JsonFlattenConverter<T> : JsonConverter<T> where T : class
                 element.WriteTo(writer);
             }
         }
+
+        // Write normal props
+        foreach (var prop in normalProps)
+        {
+            var propValue =  prop.GetValue(value);
+            writer.WritePropertyName(GetJsonPropertyName(prop));
+            JsonSerializer.Serialize(writer, propValue, prop.PropertyType, options);
+        }
+
+        writer.WriteEndObject();
     }
 
     private static string GetJsonPropertyName(PropertyInfo prop)
