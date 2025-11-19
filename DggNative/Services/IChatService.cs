@@ -14,4 +14,5 @@ public interface IChatService
     
     // Stream of all messages received from the websocket, parsed into objects
     IObservable<IWebSocketMessage> MessageStream { get; }
+    IObservable<bool> IsConnected { get; }
 }

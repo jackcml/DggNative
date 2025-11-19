@@ -11,17 +11,28 @@ namespace DggNative.Services;
 
 public class WebSocketChatService(Uri serverUri) : IChatService, IDisposable
 {
+    private readonly BehaviorSubject<bool> _connectionState = new(false);
     private readonly ClientWebSocket _webSocket = new();
     private readonly CancellationTokenSource _cancellationTokenSource = new();
     private readonly Subject<IWebSocketMessage> _messageSubject = new();
     private Task? _receiveLoopTask;
 
     public IObservable<IWebSocketMessage> MessageStream => _messageSubject.AsObservable();
+    public IObservable<bool> IsConnected => _connectionState.AsObservable();
 
     public async Task ConnectAsync()
     {
-        await _webSocket.ConnectAsync(serverUri, _cancellationTokenSource.Token);
-        _receiveLoopTask = ReceiveLoopAsync(_cancellationTokenSource.Token);
+        try
+        {
+            await _webSocket.ConnectAsync(serverUri, _cancellationTokenSource.Token);
+            _connectionState.OnNext(true);
+            _receiveLoopTask = ReceiveLoopAsync(_cancellationTokenSource.Token);
+        }
+        catch
+        {
+            _connectionState.OnNext(false);
+            throw;
+        }
     }
 
     private async Task ReceiveLoopAsync(CancellationToken cancellationToken)

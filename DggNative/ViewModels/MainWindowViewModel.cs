@@ -9,8 +9,10 @@ using DggNative.Services;
 
 namespace DggNative.ViewModels;
 
-public class MainWindowViewModel : ObservableObject
+public partial class MainWindowViewModel : ObservableObject
 {
+    [ObservableProperty]
+    private bool _isConnected;
     public ObservableCollection<ChatMessage> MessageList { get; } = [];
 
     public MainWindowViewModel(IChatService chatService)
@@ -19,6 +21,11 @@ public class MainWindowViewModel : ObservableObject
             OfType<ChatMessage>().
             ObserveOn(new AvaloniaSynchronizationContext()).
             Subscribe(item => MessageList.Add(item));
+        
+        chatService.IsConnected.
+            ObserveOn(new AvaloniaSynchronizationContext()).
+            Subscribe(isConnected => IsConnected = isConnected);
+        
         Task.Run(chatService.ConnectAsync);
     }
 }
