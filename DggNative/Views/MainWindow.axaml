@@ -34,7 +34,7 @@
                 IsVisible="{Binding !IsConnected}">
             <StackPanel VerticalAlignment="Center" 
                         HorizontalAlignment="Center">
-                <TextBlock Text="Connecting..." 
+                <TextBlock Text="{Binding ConnectionStatusText}" 
                            FontSize="16"/>
             </StackPanel>
         </Border>

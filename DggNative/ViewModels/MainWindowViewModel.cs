@@ -13,6 +13,10 @@ public partial class MainWindowViewModel : ObservableObject
 {
     [ObservableProperty]
     private bool _isConnected;
+
+    [ObservableProperty]
+    private string _connectionStatusText = "Disconnected";
+    
     public ObservableCollection<ChatMessage> MessageList { get; } = [];
 
     public MainWindowViewModel(IChatService chatService)
@@ -24,7 +28,18 @@ public partial class MainWindowViewModel : ObservableObject
         
         chatService.IsConnected.
             ObserveOn(new AvaloniaSynchronizationContext()).
-            Subscribe(isConnected => IsConnected = isConnected);
+            Subscribe(status =>
+            {
+                IsConnected = status is ConnectionStatusConnected;
+                ConnectionStatusText = status switch
+                {
+                    ConnectionStatusConnected => "Connected",
+                    ConnectionStatusDisconnected => "Disconnected",
+                    ConnectionStatusConnecting => "Connecting...",
+                    ConnectionStatusRetrying r => $"Retrying in {Math.Ceiling(r.MillisecondsUntilRetry / 1000.0)}s...",
+                    _ => "Unknown"
+                };
+            });
         
         Task.Run(chatService.ConnectAsync);
     }

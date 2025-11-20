@@ -11,38 +11,86 @@ namespace DggNative.Services;
 
 public class WebSocketChatService(Uri serverUri) : IChatService, IDisposable
 {
-    private readonly BehaviorSubject<bool> _connectionState = new(false);
-    private readonly ClientWebSocket _webSocket = new();
+    private readonly BehaviorSubject<ConnectionStatus> _connectionState = new(new ConnectionStatusDisconnected());
+    private ClientWebSocket? _webSocket;
     private readonly CancellationTokenSource _cancellationTokenSource = new();
     private readonly Subject<IWebSocketMessage> _messageSubject = new();
-    private Task? _receiveLoopTask;
+    private int _retryAttempts;
 
     public IObservable<IWebSocketMessage> MessageStream => _messageSubject.AsObservable();
-    public IObservable<bool> IsConnected => _connectionState.AsObservable();
+    public IObservable<ConnectionStatus> IsConnected => _connectionState.AsObservable();
 
     public async Task ConnectAsync()
     {
-        try
+        while (!_cancellationTokenSource.IsCancellationRequested)
         {
-            await _webSocket.ConnectAsync(serverUri, _cancellationTokenSource.Token);
-            _connectionState.OnNext(true);
-            _receiveLoopTask = ReceiveLoopAsync(_cancellationTokenSource.Token);
-        }
-        catch
-        {
-            _connectionState.OnNext(false);
-            throw;
+            try
+            {
+                _connectionState.OnNext(new ConnectionStatusConnecting());
+                
+                _webSocket?.Dispose();
+                _webSocket = new ClientWebSocket();
+                
+                await _webSocket.ConnectAsync(serverUri, _cancellationTokenSource.Token);
+                
+                _connectionState.OnNext(new ConnectionStatusConnected());
+                _retryAttempts = 0;
+
+                await ReceiveLoopAsync(_cancellationTokenSource.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception)
+            {
+                // Ignored, will retry
+            }
+
+            if (_cancellationTokenSource.IsCancellationRequested) break;
+
+            _connectionState.OnNext(new ConnectionStatusDisconnected());
+
+            // Backoff logic
+            var delayMs = _retryAttempts == 0
+                ? Random.Shared.Next(501, 3001)
+                : Random.Shared.Next(5000, 30001);
+
+            _retryAttempts++;
+
+            // Countdown loop
+            while (delayMs > 0)
+            {
+                _connectionState.OnNext(new ConnectionStatusRetrying(delayMs));
+                
+                const int stepMs = 250;
+                await Task.Delay(Math.Min(stepMs, delayMs), _cancellationTokenSource.Token);
+                delayMs -= stepMs;
+                
+                if (_cancellationTokenSource.IsCancellationRequested) break;
+            }
         }
     }
 
     private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
     {
+        if (_webSocket == null) return;
+        
         // NOTE: 8K message length limit, assuming single frame
         var buffer = new byte[8192];
 
         while (!cancellationToken.IsCancellationRequested && _webSocket.State == WebSocketState.Open)
         {
-            var result = await _webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
+            WebSocketReceiveResult result;
+            try 
+            {
+                result = await _webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
+            }
+            catch
+            {
+                break; // Connection failed
+            }
+
             if (result.MessageType == WebSocketMessageType.Close)
             {
                 await _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, CancellationToken.None);
@@ -50,9 +98,12 @@ public class WebSocketChatService(Uri serverUri) : IChatService, IDisposable
             }
 
             if (result.MessageType != WebSocketMessageType.Text) continue;
+            
             // Get object type from first word of buffer
             ReadOnlySpan<byte> messageBytes = buffer.AsSpan(0, result.Count);
             var spaceIndex = messageBytes.IndexOf((byte)' ');
+            if (spaceIndex == -1) continue; // Invalid message format
+
             var objectType = Encoding.UTF8.GetString(messageBytes[..spaceIndex]);
 
             // Parse remaining buffer data (JSON) into corresponding IWebSocketMessage type
@@ -70,20 +121,23 @@ public class WebSocketChatService(Uri serverUri) : IChatService, IDisposable
     {
         await _cancellationTokenSource.CancelAsync();
 
-        if (_webSocket.State == WebSocketState.Open)
+        if (_webSocket is { State: WebSocketState.Open })
         {
-            await _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, CancellationToken.None);
-        }
-        
-        // Wait for receive loop to complete
-        if (_receiveLoopTask != null)
-        {
-            await _receiveLoopTask;
+            try 
+            {
+                await _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, CancellationToken.None);
+            }
+            catch
+            {
+                // Ignore close errors
+            }
         }
     }
     
     public async Task SendMessageAsync(string message, CancellationToken cancellationToken)
     {
+        if (_webSocket is not { State: WebSocketState.Open }) return;
+        
         var bytes = Encoding.UTF8.GetBytes(message);
         await _webSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cancellationToken);
     }
@@ -93,7 +147,8 @@ public class WebSocketChatService(Uri serverUri) : IChatService, IDisposable
         GC.SuppressFinalize(this);
         _cancellationTokenSource.Cancel();
         _cancellationTokenSource.Dispose();
-        _webSocket.Dispose();
+        _webSocket?.Dispose();
         _messageSubject.Dispose();
+        _connectionState.Dispose();
     }
 }
