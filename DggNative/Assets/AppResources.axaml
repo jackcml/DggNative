@@ -1,0 +1,27 @@
+﻿<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:converters="clr-namespace:DggNative.Converters">
+    <converters:SubscriptionToColorConverter x:Key="SubscriptionToColorConverter" />
+
+    <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light"></ResourceDictionary>
+        <ResourceDictionary x:Key="Dark"></ResourceDictionary>
+        <ResourceDictionary x:Key="Default">
+            <SolidColorBrush x:Key="Tier1Brush">#59AEEA</SolidColorBrush>
+            <SolidColorBrush x:Key="Tier2Brush">#2ADDC8</SolidColorBrush>
+            <SolidColorBrush x:Key="Tier3Brush">#4DB524</SolidColorBrush>
+            <SolidColorBrush x:Key="Tier4Brush">#DD29D2</SolidColorBrush>
+            <LinearGradientBrush x:Key="Tier5Brush" StartPoint="0%,0%" EndPoint="50%,0%" SpreadMethod="Repeat">
+                <GradientStop Offset="0.000" Color="#FF4C4C"/>
+                <GradientStop Offset="0.125" Color="#FFD94C"/>
+                <GradientStop Offset="0.250" Color="#A6FF4C"/>
+                <GradientStop Offset="0.375" Color="#4CFF73"/>
+                <GradientStop Offset="0.500" Color="#4CFFFF"/>
+                <GradientStop Offset="0.625" Color="#4C79FF"/>
+                <GradientStop Offset="0.750" Color="#A64CFF"/>
+                <GradientStop Offset="0.875" Color="#FF4CD9"/>
+                <GradientStop Offset="1.000" Color="#FF4C4C"/>
+            </LinearGradientBrush>
+        </ResourceDictionary>
+    </ResourceDictionary.ThemeDictionaries>
+</ResourceDictionary>

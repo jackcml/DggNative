@@ -21,7 +21,11 @@
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
                         <TextBlock Padding="1.4 8.4 1.4 4.2" TextWrapping="Wrap">
-                            <Run Text="{Binding User.Nick}" FontWeight="500" /><Run Text=":" />
+                            <Run
+                                Text="{Binding User.Nick}"
+                                FontWeight="500"
+                                Foreground="{Binding User.Subscription, Converter={StaticResource SubscriptionToColorConverter}}"
+                            /><Run Text=":" />
                             <Run Text="{Binding Data}"></Run>
                         </TextBlock>
                     </DataTemplate>
