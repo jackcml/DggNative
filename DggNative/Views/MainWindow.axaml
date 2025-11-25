@@ -15,8 +15,8 @@
         <vm:MainWindowViewModel/>
     </Design.DataContext>
 
-    <Grid Loaded="Control_OnLoaded">
-        <ScrollViewer ScrollChanged="ScrollViewer_OnScrollChanged" Name="MessageScrollViewer">
+    <Grid Loaded="Control_OnLoaded" RowDefinitions="*,Auto">
+        <ScrollViewer Grid.Row="0" ScrollChanged="ScrollViewer_OnScrollChanged" Name="MessageScrollViewer">
             <ItemsControl ItemsSource="{Binding MessageList}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
@@ -34,13 +34,23 @@
         </ScrollViewer>
         
         <!-- Connecting overlay -->
-        <Border Background="#80000000" 
+        <Border Grid.Row="0" Background="#80000000" 
                 IsVisible="{Binding !IsConnected}">
             <StackPanel VerticalAlignment="Center" 
                         HorizontalAlignment="Center">
                 <TextBlock Text="{Binding ConnectionStatusText}" 
                            FontSize="16"/>
             </StackPanel>
+        </Border>
+        
+        <!-- Input area -->
+        <Border Grid.Row="1"
+                BorderBrush="#CCCCCC"
+                BorderThickness="0 1 0 0"
+                Padding="8">
+            <TextBox Name="MessageInput"
+                     KeyDown="MessageInput_OnKeyDown"
+                     Watermark="{Binding LocalUser.Nick, StringFormat='Write something {0}...'}" />
         </Border>
     </Grid>
 </Window>

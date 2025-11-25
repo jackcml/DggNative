@@ -2,6 +2,7 @@ using System;
 using System.Collections.Specialized;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using DggNative.ViewModels;
 
@@ -34,5 +35,19 @@ public partial class MainWindow : Window
     {
         if (e.Action == NotifyCollectionChangedAction.Add && _isScrolledToBottom)
             MessageScrollViewer.ScrollToEnd();
+    }
+
+    private async void MessageInput_OnKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (sender is not TextBox textBox
+            || DataContext is not MainWindowViewModel vm
+            || textBox.Text is null) return;
+        
+        if (e.Key != Key.Enter) return;
+
+        var message = textBox.Text;
+        textBox.Clear();
+        await vm.SendMessageAsync(message);
+        e.Handled = true;
     }
 }

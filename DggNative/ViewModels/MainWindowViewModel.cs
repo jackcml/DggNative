@@ -1,9 +1,11 @@
 ﻿using System;
 using System.Collections.ObjectModel;
 using System.Reactive.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using DggNative.Models;
 using DggNative.Services;
 
@@ -11,16 +13,30 @@ namespace DggNative.ViewModels;
 
 public partial class MainWindowViewModel : ObservableObject
 {
+    private readonly IChatService _chatService;
+    
     [ObservableProperty]
     private bool _isConnected;
 
     [ObservableProperty]
     private string _connectionStatusText = "Disconnected";
     
+    // FIXME: hardcoded local user
+    public User LocalUser { get; } = new()
+    {
+        CreatedDate = "",
+        Features = [],
+        Id = 1,
+        Nick = "jackl",
+        Roles = ["USER"],
+    };
+
     public ObservableCollection<ChatMessage> MessageList { get; } = [];
 
     public MainWindowViewModel(IChatService chatService)
     {
+        _chatService = chatService;
+        
         chatService.MessageStream.
             OfType<ChatMessage>().
             ObserveOn(new AvaloniaSynchronizationContext()).
@@ -42,5 +58,11 @@ public partial class MainWindowViewModel : ObservableObject
             });
         
         Task.Run(chatService.ConnectAsync);
+    }
+
+    public async Task SendMessageAsync(string message)
+    {
+        if (!IsConnected || string.IsNullOrWhiteSpace(message) || message.Length > 512) return;
+        await _chatService.SendMessageAsync(message, CancellationToken.None);
     }
 }
