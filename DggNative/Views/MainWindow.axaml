@@ -15,8 +15,8 @@
         <vm:MainWindowViewModel/>
     </Design.DataContext>
 
-    <Grid>
-        <ScrollViewer>
+    <Grid Loaded="Control_OnLoaded">
+        <ScrollViewer ScrollChanged="ScrollViewer_OnScrollChanged" Name="MessageScrollViewer">
             <ItemsControl ItemsSource="{Binding MessageList}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
