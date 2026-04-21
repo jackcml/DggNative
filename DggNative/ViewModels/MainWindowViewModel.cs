@@ -19,15 +19,7 @@ public partial class MainWindowViewModel : ObservableObject
 
     [ObservableProperty] private string _connectionStatusText = "Disconnected";
 
-    // FIXME: hardcoded local user
-    public User LocalUser { get; } = new()
-    {
-        CreatedDate = "",
-        Features = [],
-        Id = 1,
-        Nick = "jackl",
-        Roles = ["USER"],
-    };
+    [ObservableProperty] private User? _localUser;
 
     public AvaloniaList<ChatMessage> MessageList { get; } = [];
 
@@ -45,6 +37,9 @@ public partial class MainWindowViewModel : ObservableObject
                 MessageList.AddRange(item.Messages.OfType<ChatMessage>());
                 // FIXME: handle other message types if necessary
             });
+
+        chatService.MessageStream.OfType<MeMessage>().ObserveOn(new AvaloniaSynchronizationContext())
+            .Subscribe(item => LocalUser = item.User);
 
         chatService.IsConnected.ObserveOn(new AvaloniaSynchronizationContext()).Subscribe(status =>
         {

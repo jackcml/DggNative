@@ -12,7 +12,7 @@
     <Design.DataContext>
         <!-- This only sets the DataContext for the previewer in an IDE,
              to set the actual DataContext for runtime, set the DataContext property in code (look at App.axaml.cs) -->
-        <vm:MainWindowViewModel/>
+        <vm:MainWindowViewModel />
     </Design.DataContext>
 
     <Grid Loaded="Control_OnLoaded" RowDefinitions="*,Auto">
@@ -24,25 +24,25 @@
                             <Run
                                 Text="{Binding User.Nick}"
                                 FontWeight="500"
-                                Foreground="{Binding User.Subscription, Converter={StaticResource SubscriptionToColorConverter}}"
-                            /><Run Text=":" />
+                                Foreground="{Binding User.Subscription, Converter={StaticResource SubscriptionToColorConverter}}" />
+                            <Run Text=":" />
                             <Run Text="{Binding Data}"></Run>
                         </TextBlock>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
         </ScrollViewer>
-        
+
         <!-- Connecting overlay -->
-        <Border Grid.Row="0" Background="#80000000" 
+        <Border Grid.Row="0" Background="#80000000"
                 IsVisible="{Binding !IsConnected}">
-            <StackPanel VerticalAlignment="Center" 
+            <StackPanel VerticalAlignment="Center"
                         HorizontalAlignment="Center">
-                <TextBlock Text="{Binding ConnectionStatusText}" 
-                           FontSize="16"/>
+                <TextBlock Text="{Binding ConnectionStatusText}"
+                           FontSize="16" />
             </StackPanel>
         </Border>
-        
+
         <!-- Input area -->
         <Border Grid.Row="1"
                 BorderBrush="#CCCCCC"
@@ -50,7 +50,8 @@
                 Padding="8">
             <TextBox Name="MessageInput"
                      KeyDown="MessageInput_OnKeyDown"
-                     Watermark="{Binding LocalUser.Nick, StringFormat='Write something {0}...'}" />
+                     Watermark="{Binding LocalUser.Nick, StringFormat='Write something {0}...', FallbackValue='Write something...'}" />
         </Border>
     </Grid>
 </Window>
+
