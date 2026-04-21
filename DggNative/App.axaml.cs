@@ -24,10 +24,16 @@ public partial class App : Application
             // Avoid duplicate validations from both Avalonia and the CommunityToolkit. 
             // More info: https://docs.avaloniaui.net/docs/guides/development-guides/data-validation#manage-validationplugins
             DisableAvaloniaDataAnnotationValidation();
+
+            var wsurl = Environment.GetEnvironmentVariable("wsurl");
+            if (string.IsNullOrEmpty(wsurl))
+            {
+                wsurl = "wss://chat.destiny.gg/ws";
+            }
+
             desktop.MainWindow = new MainWindow
             {
-                // NOTE: Hardcoded development server endpoint
-                DataContext = new MainWindowViewModel(new WebSocketChatService(new Uri("ws://localhost:8080"))),
+                DataContext = new MainWindowViewModel(new WebSocketChatService(new Uri(wsurl))),
             };
         }
 
