@@ -1,11 +1,11 @@
-﻿using System;
-using System.Collections.ObjectModel;
+using System;
+using System.Linq;
+using Avalonia.Collections;
 using System.Reactive.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
 using DggNative.Models;
 using DggNative.Services;
 
@@ -14,13 +14,11 @@ namespace DggNative.ViewModels;
 public partial class MainWindowViewModel : ObservableObject
 {
     private readonly IChatService _chatService;
-    
-    [ObservableProperty]
-    private bool _isConnected;
 
-    [ObservableProperty]
-    private string _connectionStatusText = "Disconnected";
-    
+    [ObservableProperty] private bool _isConnected;
+
+    [ObservableProperty] private string _connectionStatusText = "Disconnected";
+
     // FIXME: hardcoded local user
     public User LocalUser { get; } = new()
     {
@@ -31,32 +29,36 @@ public partial class MainWindowViewModel : ObservableObject
         Roles = ["USER"],
     };
 
-    public ObservableCollection<ChatMessage> MessageList { get; } = [];
+    public AvaloniaList<ChatMessage> MessageList { get; } = [];
 
     public MainWindowViewModel(IChatService chatService)
     {
         _chatService = chatService;
-        
-        chatService.MessageStream.
-            OfType<ChatMessage>().
-            ObserveOn(new AvaloniaSynchronizationContext()).
-            Subscribe(item => MessageList.Add(item));
-        
-        chatService.IsConnected.
-            ObserveOn(new AvaloniaSynchronizationContext()).
-            Subscribe(status =>
+
+        chatService.MessageStream.OfType<ChatMessage>().ObserveOn(new AvaloniaSynchronizationContext())
+            .Subscribe(item => MessageList.Add(item));
+
+        chatService.MessageStream.OfType<HistoryMessage>().ObserveOn(new AvaloniaSynchronizationContext())
+            .Subscribe(item =>
             {
-                IsConnected = status is ConnectionStatusConnected;
-                ConnectionStatusText = status switch
-                {
-                    ConnectionStatusConnected => "Connected",
-                    ConnectionStatusDisconnected => "Disconnected",
-                    ConnectionStatusConnecting => "Connecting...",
-                    ConnectionStatusRetrying r => $"Retrying in {Math.Ceiling(r.MillisecondsUntilRetry / 1000.0)}s...",
-                    _ => "Unknown"
-                };
+                MessageList.Clear();
+                MessageList.AddRange(item.Messages.OfType<ChatMessage>());
+                // FIXME: handle other message types if necessary
             });
-        
+
+        chatService.IsConnected.ObserveOn(new AvaloniaSynchronizationContext()).Subscribe(status =>
+        {
+            IsConnected = status is ConnectionStatusConnected;
+            ConnectionStatusText = status switch
+            {
+                ConnectionStatusConnected => "Connected",
+                ConnectionStatusDisconnected => "Disconnected",
+                ConnectionStatusConnecting => "Connecting...",
+                ConnectionStatusRetrying r => $"Retrying in {Math.Ceiling(r.MillisecondsUntilRetry / 1000.0)}s...",
+                _ => "Unknown"
+            };
+        });
+
         Task.Run(chatService.ConnectAsync);
     }
 
