@@ -50,7 +50,7 @@
                 Padding="8">
             <TextBox Name="MessageInput"
                      KeyDown="MessageInput_OnKeyDown"
-                     Watermark="{Binding LocalUser.Nick, StringFormat='Write something {0}...', FallbackValue='Write something...'}" />
+                     PlaceholderText="{Binding LocalUser.Nick, StringFormat='Write something {0}...', FallbackValue='Write something...'}" />
         </Border>
     </Grid>
 </Window>
