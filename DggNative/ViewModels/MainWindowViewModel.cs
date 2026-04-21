@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using Avalonia.Collections;
 using System.Reactive.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Threading;
@@ -57,9 +58,13 @@ public partial class MainWindowViewModel : ObservableObject
         Task.Run(chatService.ConnectAsync);
     }
 
-    public async Task SendMessageAsync(string message)
+    public async Task SendChatMessageAsync(string message)
     {
-        if (!IsConnected || string.IsNullOrWhiteSpace(message) || message.Length > 512) return;
-        await _chatService.SendMessageAsync(message, CancellationToken.None);
+        if (!IsConnected || string.IsNullOrWhiteSpace(message) || message.Length > 512 || LocalUser == null)
+            return;
+
+        // Serialize message as JSON
+        var json = JsonSerializer.Serialize(new ChatMessage { User = LocalUser, Data = message });
+        await _chatService.SendMessageAsync($"MSG {json}", CancellationToken.None);
     }
 }

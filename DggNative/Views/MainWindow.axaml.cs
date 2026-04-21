@@ -28,7 +28,7 @@ public partial class MainWindow : Window
         if (sender is not ScrollViewer scrollViewer) return;
         const int threshold = 50;
         _isScrolledToBottom = scrollViewer.Offset.Y + scrollViewer.Viewport.Height >=
-                             scrollViewer.Extent.Height - threshold;
+                              scrollViewer.Extent.Height - threshold;
     }
 
     private void MessageList_OnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -42,12 +42,12 @@ public partial class MainWindow : Window
         if (sender is not TextBox textBox
             || DataContext is not MainWindowViewModel vm
             || textBox.Text is null) return;
-        
+
         if (e.Key != Key.Enter) return;
 
         var message = textBox.Text;
         textBox.Clear();
-        await vm.SendMessageAsync(message);
+        await vm.SendChatMessageAsync(message);
         e.Handled = true;
     }
 }
