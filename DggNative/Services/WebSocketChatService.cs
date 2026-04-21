@@ -1,4 +1,5 @@
 using System;
+using System.Net;
 using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
@@ -28,12 +29,34 @@ public class WebSocketChatService(Uri serverUri) : IChatService, IDisposable
             try
             {
                 _connectionState.OnNext(new ConnectionStatusConnecting());
-                
+
                 _webSocket?.Dispose();
                 _webSocket = new ClientWebSocket();
-                
+
+                var sid = Environment.GetEnvironmentVariable("sid");
+                var rememberme = Environment.GetEnvironmentVariable("rememberme");
+
+                if (!string.IsNullOrEmpty(sid) || !string.IsNullOrEmpty(rememberme))
+                {
+                    var cookieContainer = new CookieContainer();
+
+                    if (!string.IsNullOrEmpty(sid))
+                    {
+                        cookieContainer.Add(new Cookie("sid", sid, "/", serverUri.Host));
+                    }
+
+                    if (!string.IsNullOrEmpty(rememberme))
+                    {
+                        cookieContainer.Add(new Cookie("rememberme", rememberme, "/", serverUri.Host));
+                    }
+
+                    _webSocket.Options.Cookies = cookieContainer;
+                }
+
+                _webSocket.Options.SetRequestHeader("Origin", "https://www.destiny.gg");
+
                 await _webSocket.ConnectAsync(serverUri, _cancellationTokenSource.Token);
-                
+
                 _connectionState.OnNext(new ConnectionStatusConnected());
                 _retryAttempts = 0;
 
@@ -63,11 +86,11 @@ public class WebSocketChatService(Uri serverUri) : IChatService, IDisposable
             while (delayMs > 0)
             {
                 _connectionState.OnNext(new ConnectionStatusRetrying(delayMs));
-                
+
                 const int stepMs = 250;
                 await Task.Delay(Math.Min(stepMs, delayMs), _cancellationTokenSource.Token);
                 delayMs -= stepMs;
-                
+
                 if (_cancellationTokenSource.IsCancellationRequested) break;
             }
         }
@@ -76,14 +99,14 @@ public class WebSocketChatService(Uri serverUri) : IChatService, IDisposable
     private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
     {
         if (_webSocket == null) return;
-        
+
         var buffer = new byte[8192];
         using var ms = new MemoryStream();
 
         while (!cancellationToken.IsCancellationRequested && _webSocket.State == WebSocketState.Open)
         {
             WebSocketReceiveResult result;
-            try 
+            try
             {
                 result = await _webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
             }
@@ -99,9 +122,9 @@ public class WebSocketChatService(Uri serverUri) : IChatService, IDisposable
             }
 
             if (result.MessageType != WebSocketMessageType.Text) continue;
-            
+
             ms.Write(buffer, 0, result.Count);
-            
+
             if (!result.EndOfMessage) continue;
 
             ReadOnlySpan<byte> messageBytes = ms.ToArray().AsSpan();
@@ -129,14 +152,14 @@ public class WebSocketChatService(Uri serverUri) : IChatService, IDisposable
             }
         }
     }
-    
+
     public async Task DisconnectAsync()
     {
         await _cancellationTokenSource.CancelAsync();
 
         if (_webSocket is { State: WebSocketState.Open })
         {
-            try 
+            try
             {
                 await _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, CancellationToken.None);
             }
@@ -146,11 +169,11 @@ public class WebSocketChatService(Uri serverUri) : IChatService, IDisposable
             }
         }
     }
-    
+
     public async Task SendMessageAsync(string message, CancellationToken cancellationToken)
     {
         if (_webSocket is not { State: WebSocketState.Open }) return;
-        
+
         var bytes = Encoding.UTF8.GetBytes(message);
         await _webSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cancellationToken);
     }
