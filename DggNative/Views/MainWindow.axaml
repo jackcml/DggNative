@@ -43,14 +43,34 @@
             </StackPanel>
         </Border>
 
-        <!-- Input area -->
+        <!-- Input area / Login prompt -->
         <Border Grid.Row="1"
                 BorderBrush="#CCCCCC"
                 BorderThickness="0 1 0 0"
                 Padding="8">
-            <TextBox Name="MessageInput"
-                     KeyDown="MessageInput_OnKeyDown"
-                     PlaceholderText="{Binding LocalUser.Nick, StringFormat='Write something {0}...', FallbackValue='Write something...'}" />
+            <Panel>
+                <!-- Login button when not authenticated -->
+                <Button Name="LoginButton"
+                        Content="Login to chat"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center"
+                        Click="LoginButton_OnClick"
+                        IsVisible="{Binding !IsLoggedIn}" />
+
+                <!-- Message input when authenticated -->
+                <Grid ColumnDefinitions="*,Auto"
+                      IsVisible="{Binding IsLoggedIn}">
+                    <TextBox Grid.Column="0"
+                             Name="MessageInput"
+                             KeyDown="MessageInput_OnKeyDown"
+                             PlaceholderText="{Binding LocalUser.Nick, StringFormat='Write something {0}...', FallbackValue='Write something...'}" />
+                    <Button Grid.Column="1"
+                            Content="Logout"
+                            Click="LogoutButton_OnClick"
+                            Margin="8,0,0,0"
+                            VerticalAlignment="Stretch" />
+                </Grid>
+            </Panel>
         </Border>
     </Grid>
 </Window>

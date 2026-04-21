@@ -15,9 +15,11 @@ public class WebSocketChatService(Uri serverUri) : IChatService, IDisposable
 {
     private readonly BehaviorSubject<ConnectionStatus> _connectionState = new(new ConnectionStatusDisconnected());
     private ClientWebSocket? _webSocket;
-    private readonly CancellationTokenSource _cancellationTokenSource = new();
+    private CancellationTokenSource _cancellationTokenSource = new();
     private readonly Subject<IWebSocketMessage> _messageSubject = new();
     private int _retryAttempts;
+    private AuthCookies? _authCookies;
+    private Task? _connectTask;
 
     public IObservable<IWebSocketMessage> MessageStream => _messageSubject.AsObservable();
     public IObservable<ConnectionStatus> IsConnected => _connectionState.AsObservable();
@@ -33,22 +35,19 @@ public class WebSocketChatService(Uri serverUri) : IChatService, IDisposable
                 _webSocket?.Dispose();
                 _webSocket = new ClientWebSocket();
 
-                var sid = Environment.GetEnvironmentVariable("sid");
-                var rememberme = Environment.GetEnvironmentVariable("rememberme");
+                // Use externally-provided auth cookies, falling back to env vars
+                var sid = _authCookies?.Sid ?? Environment.GetEnvironmentVariable("sid");
+                var rememberme = _authCookies?.RememberMe ?? Environment.GetEnvironmentVariable("rememberme");
 
                 if (!string.IsNullOrEmpty(sid) || !string.IsNullOrEmpty(rememberme))
                 {
                     var cookieContainer = new CookieContainer();
 
                     if (!string.IsNullOrEmpty(sid))
-                    {
                         cookieContainer.Add(new Cookie("sid", sid, "/", serverUri.Host));
-                    }
 
                     if (!string.IsNullOrEmpty(rememberme))
-                    {
                         cookieContainer.Add(new Cookie("rememberme", rememberme, "/", serverUri.Host));
-                    }
 
                     _webSocket.Options.Cookies = cookieContainer;
                 }
@@ -151,6 +150,33 @@ public class WebSocketChatService(Uri serverUri) : IChatService, IDisposable
                 Console.WriteLine($"Error parsing message: {ex.Message}");
             }
         }
+    }
+
+    public async Task StartAsync()
+    {
+        _connectTask = ConnectAsync();
+        await _connectTask;
+    }
+
+    public void SetAuthCookies(AuthCookies? cookies)
+    {
+        _authCookies = cookies;
+    }
+
+    public async Task ReconnectAsync()
+    {
+        await DisconnectAsync();
+
+        // Wait for the previous ConnectAsync loop to fully exit
+        if (_connectTask != null)
+        {
+            try { await _connectTask; }
+            catch { /* already handled */ }
+        }
+
+        _cancellationTokenSource = new CancellationTokenSource();
+        _connectTask = ConnectAsync();
+        await _connectTask;
     }
 
     public async Task DisconnectAsync()

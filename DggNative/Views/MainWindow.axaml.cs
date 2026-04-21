@@ -50,4 +50,16 @@ public partial class MainWindow : Window
         await vm.SendChatMessageAsync(message);
         e.Handled = true;
     }
+
+    private async void LoginButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm)
+            await vm.LoginCommand.ExecuteAsync(this);
+    }
+
+    private async void LogoutButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm)
+            await vm.LogoutCommand.ExecuteAsync(null);
+    }
 }
