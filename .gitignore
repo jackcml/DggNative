@@ -6,3 +6,5 @@ dist/
 
 *.DotSettings.user
 .idea/
+
+.env
