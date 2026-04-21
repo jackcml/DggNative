@@ -1,10 +1,11 @@
-﻿using System;
+using System;
 using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Text;
+using System.IO;
 using DggNative.Models;
 
 namespace DggNative.Services;
@@ -76,8 +77,8 @@ public class WebSocketChatService(Uri serverUri) : IChatService, IDisposable
     {
         if (_webSocket == null) return;
         
-        // NOTE: 8K message length limit, assuming single frame
         var buffer = new byte[8192];
+        using var ms = new MemoryStream();
 
         while (!cancellationToken.IsCancellationRequested && _webSocket.State == WebSocketState.Open)
         {
@@ -99,20 +100,32 @@ public class WebSocketChatService(Uri serverUri) : IChatService, IDisposable
 
             if (result.MessageType != WebSocketMessageType.Text) continue;
             
-            // Get object type from first word of buffer
-            ReadOnlySpan<byte> messageBytes = buffer.AsSpan(0, result.Count);
+            ms.Write(buffer, 0, result.Count);
+            
+            if (!result.EndOfMessage) continue;
+
+            ReadOnlySpan<byte> messageBytes = ms.ToArray().AsSpan();
+            ms.SetLength(0); // Reset for next message
+
             var spaceIndex = messageBytes.IndexOf((byte)' ');
             if (spaceIndex == -1) continue; // Invalid message format
 
             var objectType = Encoding.UTF8.GetString(messageBytes[..spaceIndex]);
 
-            // Parse remaining buffer data (JSON) into corresponding IWebSocketMessage type
-            var message = WebSocketMessageFactory.Create(objectType, messageBytes[(spaceIndex + 1)..]);
-
-            // Push message into stream
-            if (message != null)
+            try
             {
-                _messageSubject.OnNext(message);
+                // Parse remaining buffer data (JSON) into corresponding IWebSocketMessage type
+                var message = WebSocketMessageFactory.Create(objectType, messageBytes[(spaceIndex + 1)..]);
+
+                // Push message into stream
+                if (message != null)
+                {
+                    _messageSubject.OnNext(message);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error parsing message: {ex.Message}");
             }
         }
     }
