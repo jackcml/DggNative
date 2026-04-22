@@ -1,7 +1,8 @@
-﻿<ResourceDictionary xmlns="https://github.com/avaloniaui"
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:converters="clr-namespace:DggNative.Converters">
     <converters:SubscriptionToColorConverter x:Key="SubscriptionToColorConverter" />
+    <converters:MentionToBackgroundConverter x:Key="MentionToBackgroundConverter" />
 
     <ResourceDictionary.ThemeDictionaries>
         <ResourceDictionary x:Key="Light"></ResourceDictionary>
