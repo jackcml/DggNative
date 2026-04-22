@@ -31,8 +31,7 @@
                             <Run
                                 Text="{Binding User.Nick}"
                                 FontWeight="500"
-                                Foreground="{Binding User.Subscription, Converter={StaticResource SubscriptionToColorConverter}}" />
-                            <Run Text=":" />
+                                Foreground="{Binding User.Subscription, Converter={StaticResource SubscriptionToColorConverter}}" /><Run Text=":" />
                             <Run Text="{Binding Data}"></Run>
                         </TextBlock>
                     </DataTemplate>
