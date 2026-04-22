@@ -10,6 +10,8 @@ namespace DggNative;
 
 public partial class App : Application
 {
+    public EmoteCatalogService? EmoteCatalogService { get; private set; }
+
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
@@ -24,6 +26,9 @@ public partial class App : Application
             {
                 wsurl = "wss://chat.destiny.gg/ws";
             }
+
+            EmoteCatalogService = new EmoteCatalogService();
+            _ = EmoteCatalogService.InitializeAsync();
 
             desktop.MainWindow = new MainWindow
             {

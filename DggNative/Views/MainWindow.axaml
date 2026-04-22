@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:DggNative.ViewModels"
+        xmlns:controls="using:DggNative.Controls"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
@@ -20,20 +21,19 @@
             <ItemsControl ItemsSource="{Binding MessageList}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <TextBlock Padding="1.4 8.4 1.4 4.2" TextWrapping="Wrap">
-                            <TextBlock.Background>
+                        <controls:ChatMessageTextBlock Padding="1.4 8.4 1.4 4.2"
+                                                       TextWrapping="Wrap"
+                                                       NickText="{Binding User.Nick}"
+                                                       MessageText="{Binding Data}"
+                                                       NickForeground="{Binding User.Subscription, Converter={StaticResource SubscriptionToColorConverter}}">
+                            <controls:ChatMessageTextBlock.Background>
                                 <MultiBinding Converter="{StaticResource MessageBackgroundConverter}">
                                     <Binding Path="Data" />
                                     <Binding Path="$parent[Window].DataContext.LocalUser.Nick" FallbackValue="{x:Null}" TargetNullValue="{x:Null}" />
                                     <Binding Path="User.Nick" />
                                 </MultiBinding>
-                            </TextBlock.Background>
-                            <Run
-                                Text="{Binding User.Nick}"
-                                FontWeight="500"
-                                Foreground="{Binding User.Subscription, Converter={StaticResource SubscriptionToColorConverter}}" /><Run Text=":" />
-                            <Run Text="{Binding Data}"></Run>
-                        </TextBlock>
+                            </controls:ChatMessageTextBlock.Background>
+                        </controls:ChatMessageTextBlock>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
