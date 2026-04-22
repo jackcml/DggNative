@@ -48,9 +48,9 @@ class MockChatServer {
       // Send initial messages on connection
       this.sendInitialMessages(ws);
 
-      // Handle incoming messages (for future extensibility)
+      // Handle incoming messages from connected clients
       ws.on("message", (message) => {
-        this.handleIncomingMessage(ws, message);
+        this.handleIncomingMessage(message);
       });
 
       // Handle client disconnection
@@ -157,12 +157,46 @@ class MockChatServer {
     return null;
   }
 
-  handleIncomingMessage(ws, message) {
-    // For future extensibility - currently just log incoming messages
-    console.log("Received message:", message.toString());
+  handleIncomingMessage(message) {
+    const messageText = message.toString();
+    console.log("Received message:", messageText);
 
-    // Placeholder for future message handling logic
-    // Could be extended to respond to specific client commands
+    const parsedMessage = this.parseMessage(messageText);
+    if (!parsedMessage) {
+      console.warn("Ignoring unparseable message from client");
+      return;
+    }
+
+    switch (parsedMessage.type) {
+      case "MSG":
+        this.broadcastMessage(this.normalizeIncomingChatMessage(parsedMessage));
+        break;
+      default:
+        console.log(`Ignoring unsupported inbound frame type: ${parsedMessage.type}`);
+        break;
+    }
+  }
+
+  normalizeIncomingChatMessage(message) {
+    const { type, timestamp, ...payload } = message;
+
+    return `MSG ${JSON.stringify({
+      ...payload,
+      timestamp:
+        typeof timestamp === "number" && Number.isFinite(timestamp) && timestamp > 0
+          ? timestamp
+          : Date.now(),
+    })}`;
+  }
+
+  broadcastMessage(message) {
+    if (!this.wss) return;
+
+    this.wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(message);
+      }
+    });
   }
 
   stop() {

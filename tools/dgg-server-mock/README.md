@@ -6,6 +6,7 @@ A mock WebSocket chat server that simulates the DGG (Destiny.gg) chat server int
 
 - Sends initial connection messages from `messages_on_connect.json`
 - Repeatedly broadcasts messages from `messages_repeated.json` with realistic timing
+- Echoes locally sent `MSG` frames back to connected clients for send-message testing
 - Handles multiple client connections
 - Extensible message handling for future enhancements
 - Graceful shutdown handling
@@ -65,7 +66,9 @@ Connect your existing client application to `ws://localhost:8080`. The server wi
 
 1. Immediately send all messages from `messages_on_connect.json`
 2. Begin broadcasting messages from `messages_repeated.json` in a loop
-3. Handle incoming messages (currently logged for future extensibility)
+3. Handle incoming messages, including rebroadcasting local `MSG` frames for send-message testing
+
+When a client sends a chat frame like `MSG { ... }`, the mock server now rebroadcasts it as a normal `MSG` event so the local client can see its own sent messages in the chat stream without the real Destiny.gg backend.
 
 ## Extensibility
 
