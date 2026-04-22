@@ -22,9 +22,10 @@
                     <DataTemplate>
                         <TextBlock Padding="1.4 8.4 1.4 4.2" TextWrapping="Wrap">
                             <TextBlock.Background>
-                                <MultiBinding Converter="{StaticResource MentionToBackgroundConverter}">
+                                <MultiBinding Converter="{StaticResource MessageBackgroundConverter}">
                                     <Binding Path="Data" />
                                     <Binding Path="$parent[Window].DataContext.LocalUser.Nick" FallbackValue="{x:Null}" TargetNullValue="{x:Null}" />
+                                    <Binding Path="User.Nick" />
                                 </MultiBinding>
                             </TextBlock.Background>
                             <Run
