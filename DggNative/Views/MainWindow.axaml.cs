@@ -4,6 +4,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Threading;
 using DggNative.ViewModels;
 
 namespace DggNative.Views;
@@ -11,6 +12,7 @@ namespace DggNative.Views;
 public partial class MainWindow : Window
 {
     private bool _isScrolledToBottom = true;
+    private MainWindowViewModel? _notificationActivationViewModel;
 
     public MainWindow()
     {
@@ -24,6 +26,40 @@ public partial class MainWindow : Window
         if (DataContext is not MainWindowViewModel vm) return;
         vm.IsWindowFocused = IsActive;
         vm.MessageList.CollectionChanged += MessageList_OnCollectionChanged;
+        SubscribeToNotificationActivation(vm);
+    }
+
+    private void SubscribeToNotificationActivation(MainWindowViewModel vm)
+    {
+        if (ReferenceEquals(_notificationActivationViewModel, vm))
+        {
+            return;
+        }
+
+        if (_notificationActivationViewModel is not null)
+        {
+            _notificationActivationViewModel.MentionNotificationActivated -= Notification_OnActivated;
+        }
+
+        _notificationActivationViewModel = vm;
+        vm.MentionNotificationActivated += Notification_OnActivated;
+    }
+
+    private void Notification_OnActivated(object? sender, EventArgs e)
+    {
+        Dispatcher.UIThread.Post(FocusFromNotification);
+    }
+
+    private void FocusFromNotification()
+    {
+        if (WindowState == WindowState.Minimized)
+        {
+            WindowState = WindowState.Normal;
+        }
+
+        Show();
+        Activate();
+        Focus();
     }
 
     private void SetWindowFocus(bool isFocused)

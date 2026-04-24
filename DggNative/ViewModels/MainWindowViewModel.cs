@@ -33,6 +33,8 @@ public partial class MainWindowViewModel : ObservableObject
 
     public AvaloniaList<ChatMessage> MessageList { get; } = [];
 
+    public event EventHandler? MentionNotificationActivated;
+
     public MainWindowViewModel(
         WebSocketChatService chatService,
         AuthenticationService authService,
@@ -43,6 +45,8 @@ public partial class MainWindowViewModel : ObservableObject
         _authService = authService;
         _cookiePersistence = cookiePersistence;
         _desktopNotifications = desktopNotifications;
+        _desktopNotifications.NotificationActivated += (_, _) =>
+            MentionNotificationActivated?.Invoke(this, EventArgs.Empty);
 
         chatService.MessageStream.OfType<ChatMessage>().ObserveOn(new AvaloniaSynchronizationContext())
             .Subscribe(item =>
