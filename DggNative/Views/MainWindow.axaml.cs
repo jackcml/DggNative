@@ -15,12 +15,23 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        Activated += (_, _) => SetWindowFocus(true);
+        Deactivated += (_, _) => SetWindowFocus(false);
     }
 
     private void Control_OnLoaded(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not MainWindowViewModel vm) return;
+        vm.IsWindowFocused = IsActive;
         vm.MessageList.CollectionChanged += MessageList_OnCollectionChanged;
+    }
+
+    private void SetWindowFocus(bool isFocused)
+    {
+        if (DataContext is MainWindowViewModel vm)
+        {
+            vm.IsWindowFocused = isFocused;
+        }
     }
 
     private void ScrollViewer_OnScrollChanged(object? sender, ScrollChangedEventArgs e)

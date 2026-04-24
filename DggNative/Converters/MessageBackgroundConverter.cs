@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using Avalonia.Data.Converters;
 using Avalonia.Media;
+using DggNative.Models;
 
 namespace DggNative.Converters;
 
@@ -23,7 +24,7 @@ public class MessageBackgroundConverter : IMultiValueConverter
         }
 
         // User is mentioned
-        if (data.Contains(localNick, StringComparison.OrdinalIgnoreCase))
+        if (ChatMentionMatcher.MentionsUser(data, localNick))
         {
             return MentionBrush;
         }

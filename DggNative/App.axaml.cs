@@ -30,7 +30,8 @@ public partial class App : Application
                 DataContext = new MainWindowViewModel(
                     new WebSocketChatService(new Uri(wsurl)),
                     new AuthenticationService(),
-                    new CookiePersistenceService()),
+                    new CookiePersistenceService(),
+                    new DesktopNotificationService()),
             };
         }
 

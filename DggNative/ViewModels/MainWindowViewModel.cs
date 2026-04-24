@@ -19,6 +19,7 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly WebSocketChatService _chatService;
     private readonly AuthenticationService _authService;
     private readonly CookiePersistenceService _cookiePersistence;
+    private readonly IDesktopNotificationService _desktopNotifications;
 
     [ObservableProperty] private bool _isConnected;
 
@@ -28,19 +29,31 @@ public partial class MainWindowViewModel : ObservableObject
 
     [ObservableProperty] private bool _isLoggedIn;
 
+    [ObservableProperty] private bool _isWindowFocused = true;
+
     public AvaloniaList<ChatMessage> MessageList { get; } = [];
 
     public MainWindowViewModel(
         WebSocketChatService chatService,
         AuthenticationService authService,
-        CookiePersistenceService cookiePersistence)
+        CookiePersistenceService cookiePersistence,
+        IDesktopNotificationService desktopNotifications)
     {
         _chatService = chatService;
         _authService = authService;
         _cookiePersistence = cookiePersistence;
+        _desktopNotifications = desktopNotifications;
 
         chatService.MessageStream.OfType<ChatMessage>().ObserveOn(new AvaloniaSynchronizationContext())
-            .Subscribe(item => MessageList.Add(item));
+            .Subscribe(item =>
+            {
+                MessageList.Add(item);
+
+                if (!IsWindowFocused && ChatMentionMatcher.MentionsUser(item, LocalUser))
+                {
+                    _desktopNotifications.ShowMentionNotification(item);
+                }
+            });
 
         chatService.MessageStream.OfType<HistoryMessage>().ObserveOn(new AvaloniaSynchronizationContext())
             .Subscribe(item =>
@@ -86,6 +99,7 @@ public partial class MainWindowViewModel : ObservableObject
         _chatService = null!;
         _authService = null!;
         _cookiePersistence = null!;
+        _desktopNotifications = null!;
     }
 
     [RelayCommand]
