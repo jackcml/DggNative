@@ -76,12 +76,29 @@ public partial class MainWindow : Window
         const int threshold = 50;
         _isScrolledToBottom = scrollViewer.Offset.Y + scrollViewer.Viewport.Height >=
                               scrollViewer.Extent.Height - threshold;
+        UpdateMoreMessagesButton();
     }
 
     private void MessageList_OnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         if (e.Action == NotifyCollectionChangedAction.Add && _isScrolledToBottom)
+        {
             MessageScrollViewer.ScrollToEnd();
+        }
+
+        UpdateMoreMessagesButton();
+    }
+
+    private void UpdateMoreMessagesButton()
+    {
+        MoreMessagesButton.IsVisible = !_isScrolledToBottom;
+    }
+
+    private void MoreMessagesButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        MessageScrollViewer.ScrollToEnd();
+        _isScrolledToBottom = true;
+        UpdateMoreMessagesButton();
     }
 
     private async void MessageInput_OnKeyDown(object? sender, KeyEventArgs e)

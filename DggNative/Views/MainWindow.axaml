@@ -16,28 +16,42 @@
     </Design.DataContext>
 
     <Grid Loaded="Control_OnLoaded" RowDefinitions="*,Auto">
-        <ScrollViewer Grid.Row="0" ScrollChanged="ScrollViewer_OnScrollChanged" Name="MessageScrollViewer">
-            <ItemsControl ItemsSource="{Binding MessageList}">
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate>
-                        <TextBlock Padding="1.4 8.4 1.4 4.2" TextWrapping="Wrap">
-                            <TextBlock.Background>
-                                <MultiBinding Converter="{StaticResource MessageBackgroundConverter}">
-                                    <Binding Path="Data" />
-                                    <Binding Path="$parent[Window].DataContext.LocalUser.Nick" FallbackValue="{x:Null}" TargetNullValue="{x:Null}" />
-                                    <Binding Path="User.Nick" />
-                                </MultiBinding>
-                            </TextBlock.Background>
-                            <Run
-                                Text="{Binding User.Nick}"
-                                FontWeight="500"
-                                Foreground="{Binding User.Subscription, Converter={StaticResource SubscriptionToColorConverter}}" /><Run Text=":" />
-                            <Run Text="{Binding Data}"></Run>
-                        </TextBlock>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
-        </ScrollViewer>
+        <Grid Grid.Row="0">
+            <ScrollViewer ScrollChanged="ScrollViewer_OnScrollChanged" Name="MessageScrollViewer">
+                <ItemsControl ItemsSource="{Binding MessageList}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Padding="1.4 8.4 1.4 4.2" TextWrapping="Wrap">
+                                <TextBlock.Background>
+                                    <MultiBinding Converter="{StaticResource MessageBackgroundConverter}">
+                                        <Binding Path="Data" />
+                                        <Binding Path="$parent[Window].DataContext.LocalUser.Nick" FallbackValue="{x:Null}" TargetNullValue="{x:Null}" />
+                                        <Binding Path="User.Nick" />
+                                    </MultiBinding>
+                                </TextBlock.Background>
+                                <Run
+                                    Text="{Binding User.Nick}"
+                                    FontWeight="500"
+                                    Foreground="{Binding User.Subscription, Converter={StaticResource SubscriptionToColorConverter}}" /><Run Text=":" />
+                                <Run Text="{Binding Data}"></Run>
+                            </TextBlock>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+
+            <Button Name="MoreMessagesButton"
+                    Content="More messages below"
+                    IsVisible="False"
+                    Click="MoreMessagesButton_OnClick"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Bottom"
+                    Margin="0,0,0,12"
+                    Padding="12,6"
+                    CornerRadius="16"
+                    Opacity="0.95"
+                    ZIndex="1" />
+        </Grid>
 
         <!-- Connecting overlay -->
         <Border Grid.Row="0" Background="#80000000"
