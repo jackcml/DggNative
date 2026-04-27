@@ -1,6 +1,8 @@
 using System;
 using DggNative.Models;
+#if WINDOWS
 using Microsoft.Toolkit.Uwp.Notifications;
+#endif
 
 namespace DggNative.Services;
 
@@ -12,6 +14,7 @@ public sealed class DesktopNotificationService : IDesktopNotificationService
 
     public void ShowMentionNotification(ChatMessage message)
     {
+#if WINDOWS
         if (!OperatingSystem.IsWindows())
         {
             return;
@@ -37,8 +40,12 @@ public sealed class DesktopNotificationService : IDesktopNotificationService
         {
             Console.WriteLine($"Failed to show desktop notification: {ex.Message}");
         }
+#else
+        Console.WriteLine($"[Notification] {message.User.Nick} mentioned you: {message.Data}");
+#endif
     }
 
+#if WINDOWS
     private static string TrimNotificationBody(string body)
     {
         if (body.Length <= MaxBodyLength)
@@ -48,4 +55,5 @@ public sealed class DesktopNotificationService : IDesktopNotificationService
 
         return body[..(MaxBodyLength - 3)] + "...";
     }
+#endif
 }
