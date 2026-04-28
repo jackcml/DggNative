@@ -1,5 +1,9 @@
 using Avalonia;
 using System;
+using System.Collections.Generic;
+using System.IO;
+using Xilium.CefGlue;
+using Xilium.CefGlue.Common;
 
 namespace DggNative;
 
@@ -20,5 +24,26 @@ sealed class Program
         => AppBuilder.Configure<App>()
             .UsePlatformDetect()
             .WithInterFont()
+            .AfterSetup(_ => ConfigureCef())
             .LogToTrace();
+
+    private static void ConfigureCef()
+    {
+        var cefRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "DggNative",
+            "cef");
+
+        CefRuntimeLoader.Initialize(
+            new CefSettings
+            {
+                CachePath = Path.Combine(cefRoot, "profile"),
+                RootCachePath = cefRoot,
+                WindowlessRenderingEnabled = false
+            },
+            [
+                KeyValuePair.Create("disable-gpu", "1"),
+                KeyValuePair.Create("disable-gpu-compositing", "1")
+            ]);
+    }
 }

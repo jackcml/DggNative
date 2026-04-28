@@ -1,8 +1,13 @@
 using System;
-using System.Linq;
+using System.Collections.Specialized;
 using System.Threading.Tasks;
 using Avalonia.Controls;
+using Avalonia.Threading;
 using DggNative.Models;
+using Xilium.CefGlue;
+using Xilium.CefGlue.Avalonia;
+using Xilium.CefGlue.Common.Events;
+using Xilium.CefGlue.Common.Handlers;
 
 namespace DggNative.Services;
 
@@ -12,64 +17,238 @@ public class AuthenticationService
 
     public async Task<AuthCookies?> LoginAsync(Window owner)
     {
-        var tcs = new TaskCompletionSource<AuthCookies?>();
-
-        var dialog = new NativeWebDialog
+        try
         {
-            Title = "Login to Destiny.gg",
-            Source = LoginUri,
-            CanUserResize = true
-        };
-
-        dialog.NavigationCompleted += async (_, args) =>
+            var tcs = new TaskCompletionSource<AuthCookies?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var dialog = new CefLoginWindow(tcs);
+            dialog.Closed += (_, _) => tcs.TrySetResult(null);
+            dialog.Show(owner);
+            return await tcs.Task;
+        }
+        catch (Exception ex)
         {
-            if (!args.IsSuccess) return;
+            Console.WriteLine($"[AuthenticationService] Failed to open login window: {ex.Message}");
+            return null;
+        }
+    }
 
-            // After a successful login, destiny.gg redirects away from /login.
-            // Detect when we've left the login page.
-            var currentUrl = dialog.Source;
+    private sealed class CefLoginWindow : Window
+    {
+        private readonly TaskCompletionSource<AuthCookies?> _completion;
+        private readonly AvaloniaCefBrowser _browser;
+        private readonly AuthCookieStore _cookies = new();
+        private bool _isCompleting;
 
-            // If we navigated to a non-destiny.gg domain (OAuth provider),
-            // ignore it since the login flow is still in progress.
-            if (!currentUrl.Host.Equals("www.destiny.gg", StringComparison.OrdinalIgnoreCase))
-                return;
+        public CefLoginWindow(TaskCompletionSource<AuthCookies?> completion)
+        {
+            _completion = completion;
 
-            var path = currentUrl.AbsolutePath;
-            if (path.StartsWith("/login", StringComparison.OrdinalIgnoreCase)) return;
+            Title = "Login to Destiny.gg";
+            Width = 900;
+            Height = 700;
+            MinWidth = 640;
+            MinHeight = 480;
+            CanResize = true;
+            WindowStartupLocation = WindowStartupLocation.CenterOwner;
 
-            // We've navigated away from the login page — extract cookies
-            var cookieManager = dialog.TryGetCookieManager();
-            if (cookieManager == null)
+            _browser = new AvaloniaCefBrowser();
+            _browser.LifeSpanHandler = new SameWindowPopupHandler(url => _browser.Address = url);
+            _browser.RequestHandler = new AuthRequestHandler(_cookies);
+            _browser.LoadEnd += Browser_OnLoadEnd;
+            _browser.Address = LoginUri.ToString();
+
+            Content = _browser;
+        }
+
+        private void Browser_OnLoadEnd(object sender, LoadEndEventArgs args)
+        {
+            if (!args.Frame.IsMain || _isCompleting)
             {
-                tcs.TrySetResult(null);
-                dialog.Close();
                 return;
             }
 
-            var cookies = await cookieManager.GetCookiesAsync();
+            if (!IsCompletedLoginUrl(args.Frame.Url))
+            {
+                return;
+            }
 
-            var sid = cookies.FirstOrDefault(c =>
-                c.Name.Equals("sid", StringComparison.OrdinalIgnoreCase))?.Value;
+            Dispatcher.UIThread.Post(CompleteLogin);
+        }
 
-            // NOTE: rememberme seems not to be set here for some reason, though we know it
-            // exists on the web client. The sid alone seems sufficient for authentication;
-            // we persist it to disk ourselves to survive app restarts.
-            var rememberMe = cookies.FirstOrDefault(c =>
-                c.Name.Equals("rememberme", StringComparison.OrdinalIgnoreCase))?.Value;
-
-            var authCookies = new AuthCookies(sid, rememberMe);
-            tcs.TrySetResult(authCookies.HasCredentials ? authCookies : null);
-
-            dialog.Close();
-        };
-
-        dialog.Closing += (_, _) =>
+        private void CompleteLogin()
         {
-            // If the user manually closed the dialog without completing login
-            tcs.TrySetResult(null);
-        };
+            if (_isCompleting)
+            {
+                return;
+            }
 
-        dialog.Show(owner);
-        return await tcs.Task;
+            _isCompleting = true;
+
+            try
+            {
+                var cookies = _cookies.ToAuthCookies();
+                _completion.TrySetResult(cookies);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AuthenticationService] Failed to read CEF auth cookies: {ex.Message}");
+                _completion.TrySetResult(null);
+            }
+            finally
+            {
+                _browser.LoadEnd -= Browser_OnLoadEnd;
+                Hide();
+            }
+        }
+
+        private static bool IsCompletedLoginUrl(string? url)
+        {
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var currentUrl))
+            {
+                return false;
+            }
+
+            if (!currentUrl.Host.Equals(LoginUri.Host, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return !currentUrl.AbsolutePath.StartsWith("/login", StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private sealed class AuthRequestHandler(AuthCookieStore cookies) : RequestHandler
+    {
+        private readonly AuthResourceRequestHandler _resourceRequestHandler = new(cookies);
+
+        protected override CefResourceRequestHandler GetResourceRequestHandler(
+            CefBrowser browser,
+            CefFrame frame,
+            CefRequest request,
+            bool isNavigation,
+            bool isDownload,
+            string requestInitiator,
+            ref bool disableDefaultHandling)
+        {
+            return _resourceRequestHandler;
+        }
+    }
+
+    private sealed class AuthResourceRequestHandler(AuthCookieStore cookies) : CefResourceRequestHandler
+    {
+        protected override CefCookieAccessFilter? GetCookieAccessFilter(
+            CefBrowser browser,
+            CefFrame frame,
+            CefRequest request)
+        {
+            return null;
+        }
+
+        protected override bool OnResourceResponse(
+            CefBrowser browser,
+            CefFrame frame,
+            CefRequest request,
+            CefResponse response)
+        {
+            CaptureSetCookieHeaders(request, response);
+            return false;
+        }
+
+        protected override void OnResourceRedirect(
+            CefBrowser browser,
+            CefFrame frame,
+            CefRequest request,
+            CefResponse response,
+            ref string newUrl)
+        {
+            CaptureSetCookieHeaders(request, response);
+        }
+
+        private void CaptureSetCookieHeaders(CefRequest request, CefResponse response)
+        {
+            if (!IsDestinyHost(request.Url))
+            {
+                return;
+            }
+
+            var headers = response.GetHeaderMap();
+            foreach (var setCookie in GetHeaderValues(headers, "Set-Cookie"))
+            {
+                cookies.CaptureSetCookie(setCookie);
+            }
+        }
+
+        private static bool IsDestinyHost(string? url)
+        {
+            return Uri.TryCreate(url, UriKind.Absolute, out var uri)
+                   && uri.Host.EndsWith("destiny.gg", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string[] GetHeaderValues(NameValueCollection headers, string name)
+        {
+            return headers.GetValues(name) ?? [];
+        }
+    }
+
+    private sealed class SameWindowPopupHandler(Action<string> navigate) : LifeSpanHandler
+    {
+        protected override bool OnBeforePopup(
+            CefBrowser browser,
+            CefFrame frame,
+            string targetUrl,
+            string targetFrameName,
+            CefWindowOpenDisposition targetDisposition,
+            bool userGesture,
+            CefPopupFeatures popupFeatures,
+            CefWindowInfo windowInfo,
+            ref CefClient client,
+            CefBrowserSettings settings,
+            ref CefDictionaryValue extraInfo,
+            ref bool noJavascriptAccess)
+        {
+            Dispatcher.UIThread.Post(() => navigate(targetUrl));
+            return true;
+        }
+    }
+
+    private sealed class AuthCookieStore
+    {
+        private readonly object _lock = new();
+        private string? _sid;
+        private string? _rememberMe;
+
+        public void CaptureSetCookie(string setCookie)
+        {
+            var equalsIndex = setCookie.IndexOf('=');
+            if (equalsIndex <= 0)
+                return;
+
+            var name = setCookie[..equalsIndex].Trim();
+            var valueEnd = setCookie.IndexOf(';', equalsIndex + 1);
+            var value = valueEnd >= 0
+                ? setCookie[(equalsIndex + 1)..valueEnd]
+                : setCookie[(equalsIndex + 1)..];
+
+            lock (_lock)
+            {
+                if (name.Equals("sid", StringComparison.OrdinalIgnoreCase))
+                {
+                    _sid = value;
+                }
+                else if (name.Equals("rememberme", StringComparison.OrdinalIgnoreCase))
+                {
+                    _rememberMe = value;
+                }
+            }
+        }
+
+        public AuthCookies? ToAuthCookies()
+        {
+            lock (_lock)
+            {
+                var cookies = new AuthCookies(_sid, _rememberMe);
+                return cookies.HasCredentials ? cookies : null;
+            }
+        }
     }
 }

@@ -83,7 +83,7 @@
                     <TextBox Grid.Column="0"
                              Name="MessageInput"
                              KeyDown="MessageInput_OnKeyDown"
-                             PlaceholderText="{Binding LocalUser.Nick, StringFormat='Write something {0}...', FallbackValue='Write something...'}" />
+                             Watermark="{Binding LocalUser.Nick, StringFormat='Write something {0}...', FallbackValue='Write something...'}" />
                     <Button Grid.Column="1"
                             Content="Logout"
                             Click="LogoutButton_OnClick"
@@ -94,4 +94,3 @@
         </Border>
     </Grid>
 </Window>
-
