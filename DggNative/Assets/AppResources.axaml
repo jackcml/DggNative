@@ -5,13 +5,44 @@
     <converters:MessageBackgroundConverter x:Key="MessageBackgroundConverter" />
 
     <ResourceDictionary.ThemeDictionaries>
-        <ResourceDictionary x:Key="Light"></ResourceDictionary>
-        <ResourceDictionary x:Key="Dark"></ResourceDictionary>
-        <ResourceDictionary x:Key="Default">
+        <ResourceDictionary x:Key="Light">
+            <SolidColorBrush x:Key="ChatMentionBackgroundBrush">#D9ECFF</SolidColorBrush>
+            <SolidColorBrush x:Key="ChatOwnMessageBackgroundBrush">#EEF1F4</SolidColorBrush>
+            <SolidColorBrush x:Key="ChatInputBorderBrush">#D0D7DE</SolidColorBrush>
+            <SolidColorBrush x:Key="ChatOverlayBackgroundBrush">#D9FFFFFF</SolidColorBrush>
+            <SolidColorBrush x:Key="ChatOverlayForegroundBrush">#1F2328</SolidColorBrush>
+            <SolidColorBrush x:Key="DefaultChatNameBrush">#1F2328</SolidColorBrush>
+
+            <SolidColorBrush x:Key="Tier1Brush">#0969DA</SolidColorBrush>
+            <SolidColorBrush x:Key="Tier2Brush">#0A7F73</SolidColorBrush>
+            <SolidColorBrush x:Key="Tier3Brush">#2F7D20</SolidColorBrush>
+            <SolidColorBrush x:Key="Tier4Brush">#A626A4</SolidColorBrush>
+            <SolidColorBrush x:Key="Tier5Brush">#6203fc</SolidColorBrush>
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+            <SolidColorBrush x:Key="ChatMentionBackgroundBrush">#16324A</SolidColorBrush>
+            <SolidColorBrush x:Key="ChatOwnMessageBackgroundBrush">#24272B</SolidColorBrush>
+            <SolidColorBrush x:Key="ChatInputBorderBrush">#3A3F45</SolidColorBrush>
+            <SolidColorBrush x:Key="ChatOverlayBackgroundBrush">#B0000000</SolidColorBrush>
+            <SolidColorBrush x:Key="ChatOverlayForegroundBrush">#F0F3F6</SolidColorBrush>
+            <SolidColorBrush x:Key="DefaultChatNameBrush">#F0F3F6</SolidColorBrush>
+
             <SolidColorBrush x:Key="Tier1Brush">#59AEEA</SolidColorBrush>
             <SolidColorBrush x:Key="Tier2Brush">#2ADDC8</SolidColorBrush>
-            <SolidColorBrush x:Key="Tier3Brush">#4DB524</SolidColorBrush>
-            <SolidColorBrush x:Key="Tier4Brush">#DD29D2</SolidColorBrush>
+            <SolidColorBrush x:Key="Tier3Brush">#5CCB33</SolidColorBrush>
+            <SolidColorBrush x:Key="Tier4Brush">#E052D8</SolidColorBrush>
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Default">
+            <SolidColorBrush x:Key="ChatMentionBackgroundBrush">#D9ECFF</SolidColorBrush>
+            <SolidColorBrush x:Key="ChatOwnMessageBackgroundBrush">#EEF1F4</SolidColorBrush>
+            <SolidColorBrush x:Key="ChatInputBorderBrush">#D0D7DE</SolidColorBrush>
+            <SolidColorBrush x:Key="ChatOverlayBackgroundBrush">#D9FFFFFF</SolidColorBrush>
+            <SolidColorBrush x:Key="ChatOverlayForegroundBrush">#1F2328</SolidColorBrush>
+            <SolidColorBrush x:Key="DefaultChatNameBrush">#1F2328</SolidColorBrush>
+            <SolidColorBrush x:Key="Tier1Brush">#0969DA</SolidColorBrush>
+            <SolidColorBrush x:Key="Tier2Brush">#0A7F73</SolidColorBrush>
+            <SolidColorBrush x:Key="Tier3Brush">#2F7D20</SolidColorBrush>
+            <SolidColorBrush x:Key="Tier4Brush">#A626A4</SolidColorBrush>
             <LinearGradientBrush x:Key="Tier5Brush" StartPoint="0%,0%" EndPoint="50%,0%" SpreadMethod="Repeat">
                 <GradientStop Offset="0.000" Color="#FF4C4C"/>
                 <GradientStop Offset="0.125" Color="#FFD94C"/>

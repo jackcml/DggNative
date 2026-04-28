@@ -27,12 +27,19 @@
                                         <Binding Path="Data" />
                                         <Binding Path="$parent[Window].DataContext.LocalUser.Nick" FallbackValue="{x:Null}" TargetNullValue="{x:Null}" />
                                         <Binding Path="User.Nick" />
+                                        <Binding Path="$parent[Window].ActualThemeVariant" />
                                     </MultiBinding>
                                 </TextBlock.Background>
                                 <Run
                                     Text="{Binding User.Nick}"
                                     FontWeight="500"
-                                    Foreground="{Binding User.Subscription, Converter={StaticResource SubscriptionToColorConverter}}" /><Run Text=":" />
+                                    ><Run.Foreground>
+                                        <MultiBinding Converter="{StaticResource SubscriptionToColorConverter}">
+                                            <Binding Path="User.Subscription" />
+                                            <Binding Path="$parent[Window].ActualThemeVariant" />
+                                        </MultiBinding>
+                                    </Run.Foreground>
+                                </Run><Run Text=":" />
                                 <Run Text="{Binding Data}"></Run>
                             </TextBlock>
                         </DataTemplate>
@@ -54,18 +61,19 @@
         </Grid>
 
         <!-- Connecting overlay -->
-        <Border Grid.Row="0" Background="#80000000"
+        <Border Grid.Row="0" Background="{DynamicResource ChatOverlayBackgroundBrush}"
                 IsVisible="{Binding !IsConnected}">
             <StackPanel VerticalAlignment="Center"
                         HorizontalAlignment="Center">
                 <TextBlock Text="{Binding ConnectionStatusText}"
-                           FontSize="16" />
+                           FontSize="16"
+                           Foreground="{DynamicResource ChatOverlayForegroundBrush}" />
             </StackPanel>
         </Border>
 
         <!-- Input area / Login prompt -->
         <Border Grid.Row="1"
-                BorderBrush="#CCCCCC"
+                BorderBrush="{DynamicResource ChatInputBorderBrush}"
                 BorderThickness="0 1 0 0"
                 Padding="8">
             <Panel>
