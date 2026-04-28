@@ -29,6 +29,11 @@ public class AuthenticationService
             // Detect when we've left the login page.
             var currentUrl = dialog.Source;
 
+            // If we navigated to a non-destiny.gg domain (OAuth provider),
+            // ignore it since the login flow is still in progress.
+            if (!currentUrl.Host.Equals("www.destiny.gg", StringComparison.OrdinalIgnoreCase))
+                return;
+
             var path = currentUrl.AbsolutePath;
             if (path.StartsWith("/login", StringComparison.OrdinalIgnoreCase)) return;
 
