@@ -11,9 +11,12 @@ using Xilium.CefGlue.Common.Handlers;
 
 namespace DggNative.Services;
 
-public class AuthenticationService
+public class AuthenticationService : IDisposable
 {
     private static readonly Uri LoginUri = new("https://www.destiny.gg/login");
+    private readonly object _lock = new();
+    private CefLoginWindow? _activeLoginWindow;
+    private bool _isDisposed;
 
     public async Task<AuthCookies?> LoginAsync(Window owner)
     {
@@ -21,6 +24,12 @@ public class AuthenticationService
         {
             var tcs = new TaskCompletionSource<AuthCookies?>(TaskCreationOptions.RunContinuationsAsynchronously);
             var dialog = new CefLoginWindow(tcs);
+            lock (_lock)
+            {
+                ThrowIfDisposed();
+                _activeLoginWindow = dialog;
+            }
+
             dialog.Closed += (_, _) => tcs.TrySetResult(null);
             dialog.Show(owner);
             return await tcs.Task;
@@ -32,12 +41,57 @@ public class AuthenticationService
         }
     }
 
+    public void Dispose()
+    {
+        CefLoginWindow? activeLoginWindow;
+        lock (_lock)
+        {
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            _isDisposed = true;
+            activeLoginWindow = _activeLoginWindow;
+            _activeLoginWindow = null;
+        }
+
+        if (activeLoginWindow is null)
+        {
+            return;
+        }
+
+        void DisposeOnUiThread()
+        {
+            activeLoginWindow.DisposeBrowser();
+            activeLoginWindow.Close();
+        }
+
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            DisposeOnUiThread();
+        }
+        else
+        {
+            Dispatcher.UIThread.Post(DisposeOnUiThread);
+        }
+    }
+
+    private void ThrowIfDisposed()
+    {
+        if (_isDisposed)
+        {
+            throw new ObjectDisposedException(nameof(AuthenticationService));
+        }
+    }
+
     private sealed class CefLoginWindow : Window
     {
         private readonly TaskCompletionSource<AuthCookies?> _completion;
         private readonly AvaloniaCefBrowser _browser;
         private readonly AuthCookieStore _cookies = new();
         private bool _isCompleting;
+        private bool _isBrowserDisposed;
 
         public CefLoginWindow(TaskCompletionSource<AuthCookies?> completion)
         {
@@ -58,6 +112,19 @@ public class AuthenticationService
             _browser.Address = LoginUri.ToString();
 
             Content = _browser;
+        }
+
+        public void DisposeBrowser()
+        {
+            if (_isBrowserDisposed)
+            {
+                return;
+            }
+
+            _isBrowserDisposed = true;
+            _browser.LoadEnd -= Browser_OnLoadEnd;
+            Content = null;
+            _browser.Dispose();
         }
 
         private void Browser_OnLoadEnd(object sender, LoadEndEventArgs args)
@@ -98,6 +165,11 @@ public class AuthenticationService
             {
                 _browser.LoadEnd -= Browser_OnLoadEnd;
                 Hide();
+                DispatcherTimer.RunOnce(() =>
+                {
+                    DisposeBrowser();
+                    Close();
+                }, TimeSpan.FromSeconds(2));
             }
         }
 

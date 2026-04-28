@@ -5,6 +5,7 @@ using Avalonia.Markup.Xaml;
 using DggNative.Services;
 using DggNative.ViewModels;
 using DggNative.Views;
+using Xilium.CefGlue;
 
 namespace DggNative;
 
@@ -25,13 +26,30 @@ public partial class App : Application
                 wsurl = "wss://chat.destiny.gg/ws";
             }
 
+            var chatService = new WebSocketChatService(new Uri(wsurl));
+            var authenticationService = new AuthenticationService();
+            var cookiePersistenceService = new CookiePersistenceService();
+            var desktopNotificationService = new DesktopNotificationService();
+
             desktop.MainWindow = new MainWindow
             {
                 DataContext = new MainWindowViewModel(
-                    new WebSocketChatService(new Uri(wsurl)),
-                    new AuthenticationService(),
-                    new CookiePersistenceService(),
-                    new DesktopNotificationService()),
+                    chatService,
+                    authenticationService,
+                    cookiePersistenceService,
+                    desktopNotificationService),
+            };
+
+            desktop.Exit += (_, _) =>
+            {
+                authenticationService.Dispose();
+                desktopNotificationService.Dispose();
+                chatService.Dispose();
+
+                if (CefRuntime.IsInitialized)
+                {
+                    CefRuntime.Shutdown();
+                }
             };
         }
 
