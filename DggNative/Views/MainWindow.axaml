@@ -32,7 +32,7 @@
                                 </TextBlock.Background>
                                 <Run
                                     Text="{Binding User.Nick}"
-                                    FontWeight="500"
+                                    FontWeight="600"
                                     ><Run.Foreground>
                                         <MultiBinding Converter="{StaticResource SubscriptionToColorConverter}">
                                             <Binding Path="User.Subscription" />
