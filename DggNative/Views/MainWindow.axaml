@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:DggNative.ViewModels"
+        xmlns:controls="using:DggNative.Controls"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
@@ -21,27 +22,26 @@
                 <ItemsControl ItemsSource="{Binding MessageList}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <TextBlock Padding="1.4 8.4 1.4 4.2" TextWrapping="Wrap">
-                                <TextBlock.Background>
+                            <controls:ChatMessageTextBlock
+                                Padding="1.4 8.4 1.4 4.2"
+                                TextWrapping="Wrap"
+                                UserNick="{Binding User.Nick}"
+                                MessageText="{Binding Data}">
+                                <controls:ChatMessageTextBlock.Background>
                                     <MultiBinding Converter="{StaticResource MessageBackgroundConverter}">
                                         <Binding Path="Data" />
                                         <Binding Path="$parent[Window].DataContext.LocalUser.Nick" FallbackValue="{x:Null}" TargetNullValue="{x:Null}" />
                                         <Binding Path="User.Nick" />
                                         <Binding Path="$parent[Window].ActualThemeVariant" />
                                     </MultiBinding>
-                                </TextBlock.Background>
-                                <Run
-                                    Text="{Binding User.Nick}"
-                                    FontWeight="600"
-                                    ><Run.Foreground>
-                                        <MultiBinding Converter="{StaticResource SubscriptionToColorConverter}">
-                                            <Binding Path="User.Subscription" />
-                                            <Binding Path="$parent[Window].ActualThemeVariant" />
-                                        </MultiBinding>
-                                    </Run.Foreground>
-                                </Run><Run Text=":" />
-                                <Run Text="{Binding Data}"></Run>
-                            </TextBlock>
+                                </controls:ChatMessageTextBlock.Background>
+                                <controls:ChatMessageTextBlock.UserForeground>
+                                    <MultiBinding Converter="{StaticResource SubscriptionToColorConverter}">
+                                        <Binding Path="User.Subscription" />
+                                        <Binding Path="$parent[Window].ActualThemeVariant" />
+                                    </MultiBinding>
+                                </controls:ChatMessageTextBlock.UserForeground>
+                            </controls:ChatMessageTextBlock>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
