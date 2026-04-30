@@ -16,6 +16,8 @@ namespace DggNative.ViewModels;
 
 public partial class MainWindowViewModel : ObservableObject
 {
+    private const int MaxBufferedMessages = 500;
+
     private readonly WebSocketChatService _chatService;
     private readonly AuthenticationService _authService;
     private readonly CookiePersistenceService _cookiePersistence;
@@ -52,6 +54,7 @@ public partial class MainWindowViewModel : ObservableObject
             .Subscribe(item =>
             {
                 MessageList.Add(item);
+                TrimBufferedMessages();
 
                 if (!IsWindowFocused && ChatMentionMatcher.MentionsUser(item, LocalUser))
                 {
@@ -63,7 +66,7 @@ public partial class MainWindowViewModel : ObservableObject
             .Subscribe(item =>
             {
                 MessageList.Clear();
-                MessageList.AddRange(item.Messages.OfType<ChatMessage>());
+                MessageList.AddRange(item.Messages.OfType<ChatMessage>().TakeLast(MaxBufferedMessages));
                 // FIXME: handle other message types if necessary
             });
 
@@ -141,5 +144,13 @@ public partial class MainWindowViewModel : ObservableObject
         // Serialize message as JSON
         var json = JsonSerializer.Serialize(new ChatMessage { User = LocalUser, Data = message });
         await _chatService.SendMessageAsync($"MSG {json}", CancellationToken.None);
+    }
+
+    private void TrimBufferedMessages()
+    {
+        while (MessageList.Count > MaxBufferedMessages)
+        {
+            MessageList.RemoveAt(0);
+        }
     }
 }
