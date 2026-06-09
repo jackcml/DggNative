@@ -10,6 +10,30 @@ public class OutboundFramesTest
         Assert.Equal("""HELLO {"nick":"jack_1"}""", OutboundFrames.Hello("jack_1"));
     }
 
+    [Fact]
+    public void MsgFrameFlattensUserFieldsToTopLevel()
+    {
+        var user = new User
+        {
+            Id = 7,
+            Nick = "jack_1",
+            Roles = ["USER"],
+            Features = [],
+            CreatedDate = "2026-06-09T12:00:00.000Z",
+        };
+
+        var frame = OutboundFrames.Msg(user, "hello world");
+
+        Assert.StartsWith("MSG {", frame);
+        Assert.Contains("""
+                        "data":"hello world"
+                        """, frame);
+        Assert.Contains("""
+                        "nick":"jack_1"
+                        """, frame);
+        Assert.DoesNotContain("\"User\"", frame);
+    }
+
     [Theory]
     [InlineData("jack_1", true)]
     [InlineData("a", true)]

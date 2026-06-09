@@ -12,4 +12,7 @@ public static partial class OutboundFrames
     public static bool IsValidNick(string nick) => NickPattern().IsMatch(nick);
 
     public static string Hello(string nick) => $"HELLO {JsonSerializer.Serialize(new { nick })}";
+
+    public static string Msg(User user, string data) =>
+        $"MSG {JsonSerializer.Serialize(new ChatMessage { User = user, Data = data })}";
 }

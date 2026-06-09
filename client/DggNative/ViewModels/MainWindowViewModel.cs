@@ -2,7 +2,6 @@ using System;
 using System.Linq;
 using Avalonia.Collections;
 using System.Reactive.Linq;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Controls;
@@ -262,9 +261,7 @@ public partial class MainWindowViewModel : ObservableObject
             LocalUser == null)
             return;
 
-        // Serialize message as JSON
-        var json = JsonSerializer.Serialize(new ChatMessage { User = LocalUser, Data = message });
-        await _chatService.SendMessageAsync($"MSG {json}", CancellationToken.None);
+        await _chatService.SendMessageAsync(OutboundFrames.Msg(LocalUser, message), CancellationToken.None);
     }
 
     private void TrimBufferedMessages()
