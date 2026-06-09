@@ -1,0 +1,21 @@
+{
+  "name": "dgg-native-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone DGG-compatible WebSocket chat server",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "npm run build && node --watch dist/index.js",
+    "test": "npm run build && node --test \"dist/**/*.test.js\""
+  },
+  "dependencies": {
+    "ws": "^8.17.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "@types/ws": "^8.5.10",
+    "typescript": "^5.5.3"
+  }
+}
