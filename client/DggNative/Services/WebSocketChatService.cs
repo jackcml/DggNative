@@ -11,7 +11,7 @@ using DggNative.Models;
 
 namespace DggNative.Services;
 
-public class WebSocketChatService(Uri serverUri) : IChatService, IDisposable
+public class WebSocketChatService(ChatServerConfig config) : IChatService, IDisposable
 {
     private readonly BehaviorSubject<ConnectionStatus> _connectionState = new(new ConnectionStatusDisconnected());
     private ClientWebSocket? _webSocket;
@@ -20,6 +20,7 @@ public class WebSocketChatService(Uri serverUri) : IChatService, IDisposable
     private int _retryAttempts;
     private AuthCookies? _authCookies;
     private Task? _connectTask;
+    private volatile ChatServerConfig _config = config;
 
     public IObservable<IWebSocketMessage> MessageStream => _messageSubject.AsObservable();
     public IObservable<ConnectionStatus> IsConnected => _connectionState.AsObservable();
@@ -32,32 +33,42 @@ public class WebSocketChatService(Uri serverUri) : IChatService, IDisposable
             {
                 _connectionState.OnNext(new ConnectionStatusConnecting());
 
+                var config = _config;
+
                 _webSocket?.Dispose();
                 _webSocket = new ClientWebSocket();
 
-                // Use externally-provided auth cookies, falling back to env vars
-                var sid = _authCookies?.Sid ?? Environment.GetEnvironmentVariable("sid");
-                var rememberme = _authCookies?.RememberMe ?? Environment.GetEnvironmentVariable("rememberme");
-
-                if (!string.IsNullOrEmpty(sid) || !string.IsNullOrEmpty(rememberme))
+                if (config.AuthMode == ChatAuthMode.Cookie)
                 {
-                    var cookieContainer = new CookieContainer();
+                    // Use externally-provided auth cookies, falling back to env vars
+                    var sid = _authCookies?.Sid ?? Environment.GetEnvironmentVariable("sid");
+                    var rememberme = _authCookies?.RememberMe ?? Environment.GetEnvironmentVariable("rememberme");
 
-                    if (!string.IsNullOrEmpty(sid))
-                        cookieContainer.Add(new Cookie("sid", sid, "/", serverUri.Host));
+                    if (!string.IsNullOrEmpty(sid) || !string.IsNullOrEmpty(rememberme))
+                    {
+                        var cookieContainer = new CookieContainer();
 
-                    if (!string.IsNullOrEmpty(rememberme))
-                        cookieContainer.Add(new Cookie("rememberme", rememberme, "/", serverUri.Host));
+                        if (!string.IsNullOrEmpty(sid))
+                            cookieContainer.Add(new Cookie("sid", sid, "/", config.ServerUri.Host));
 
-                    _webSocket.Options.Cookies = cookieContainer;
+                        if (!string.IsNullOrEmpty(rememberme))
+                            cookieContainer.Add(new Cookie("rememberme", rememberme, "/", config.ServerUri.Host));
+
+                        _webSocket.Options.Cookies = cookieContainer;
+                    }
+
+                    _webSocket.Options.SetRequestHeader("Origin", "https://www.destiny.gg");
                 }
 
-                _webSocket.Options.SetRequestHeader("Origin", "https://www.destiny.gg");
-
-                await _webSocket.ConnectAsync(serverUri, _cancellationTokenSource.Token);
+                await _webSocket.ConnectAsync(config.ServerUri, _cancellationTokenSource.Token);
 
                 _connectionState.OnNext(new ConnectionStatusConnected());
                 _retryAttempts = 0;
+
+                if (config is { AuthMode: ChatAuthMode.Hello, HelloNick: not null })
+                {
+                    await SendMessageAsync(OutboundFrames.Hello(config.HelloNick), _cancellationTokenSource.Token);
+                }
 
                 await ReceiveLoopAsync(_cancellationTokenSource.Token);
             }
@@ -116,6 +127,15 @@ public class WebSocketChatService(Uri serverUri) : IChatService, IDisposable
 
             if (result.MessageType == WebSocketMessageType.Close)
             {
+                if (_webSocket.CloseStatus == WebSocketCloseStatus.PolicyViolation)
+                {
+                    // The server rejected us (e.g. nick already in use). Drop the nick so the
+                    // reconnect loop falls back to anonymous instead of re-sending a rejected HELLO.
+                    _config = _config with { HelloNick = null };
+                    _connectionState.OnNext(
+                        new ConnectionStatusRejected(_webSocket.CloseStatusDescription ?? "Rejected by server"));
+                }
+
                 await _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, CancellationToken.None);
                 break;
             }
@@ -161,6 +181,11 @@ public class WebSocketChatService(Uri serverUri) : IChatService, IDisposable
     public void SetAuthCookies(AuthCookies? cookies)
     {
         _authCookies = cookies;
+    }
+
+    public void Configure(ChatServerConfig config)
+    {
+        _config = config;
     }
 
     public async Task ReconnectAsync()

@@ -126,4 +126,24 @@ public partial class MainWindow : Window
         if (DataContext is MainWindowViewModel vm)
             await vm.LogoutCommand.ExecuteAsync(null);
     }
+
+    private async void JoinButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm)
+            await vm.JoinCommand.ExecuteAsync(null);
+    }
+
+    private async void NickInput_OnKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || DataContext is not MainWindowViewModel vm) return;
+
+        await vm.JoinCommand.ExecuteAsync(null);
+        e.Handled = true;
+    }
+
+    private async void SettingsButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm)
+            await vm.OpenSettingsCommand.ExecuteAsync(this);
+    }
 }

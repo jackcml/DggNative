@@ -1,0 +1,50 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:DggNative.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="420"
+        x:Class="DggNative.Views.SettingsWindow"
+        x:DataType="vm:SettingsWindowViewModel"
+        Title="Settings"
+        Width="420"
+        SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+
+    <Design.DataContext>
+        <vm:SettingsWindowViewModel />
+    </Design.DataContext>
+
+    <StackPanel Margin="16" Spacing="10">
+        <Border IsVisible="{Binding IsEnvOverrideActive}"
+                Background="{DynamicResource ChatOverlayBackgroundBrush}"
+                CornerRadius="4"
+                Padding="8">
+            <TextBlock Text="{Binding EnvOverrideText}" TextWrapping="Wrap" />
+        </Border>
+
+        <TextBlock Text="Chat server" FontWeight="Bold" />
+
+        <RadioButton GroupName="Server"
+                     Content="Official (chat.destiny.gg)"
+                     IsChecked="{Binding IsOfficial, Mode=TwoWay}" />
+        <RadioButton GroupName="Server"
+                     Content="Custom server"
+                     IsChecked="{Binding IsCustom, Mode=TwoWay}" />
+
+        <TextBox Text="{Binding CustomServerUrl}"
+                 Watermark="ws://localhost:8080"
+                 IsEnabled="{Binding IsCustom}" />
+
+        <TextBlock Text="{Binding UrlError}"
+                   Foreground="Red"
+                   TextWrapping="Wrap"
+                   IsVisible="{Binding UrlError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+            <Button Content="Cancel" Click="CancelButton_OnClick" />
+            <Button Content="Save" Click="SaveButton_OnClick" />
+        </StackPanel>
+    </StackPanel>
+</Window>

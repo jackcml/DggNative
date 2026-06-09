@@ -1,7 +1,7 @@
-using System;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using DggNative.Models;
 using DggNative.Services;
 using DggNative.ViewModels;
 using DggNative.Views;
@@ -20,15 +20,13 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var wsurl = Environment.GetEnvironmentVariable("wsurl");
-            if (string.IsNullOrEmpty(wsurl))
-            {
-                wsurl = "wss://chat.destiny.gg/ws";
-            }
-
-            var chatService = new WebSocketChatService(new Uri(wsurl));
+            // The effective server config (wsurl env override / persisted settings) is
+            // resolved by MainWindowViewModel before it starts the connection.
+            var chatService = new WebSocketChatService(
+                new ChatServerConfig(ChatServerConfig.OfficialUri, ChatAuthMode.Cookie));
             var authenticationService = new AuthenticationService();
             var cookiePersistenceService = new CookiePersistenceService();
+            var settingsPersistenceService = new SettingsPersistenceService();
             var desktopNotificationService = new DesktopNotificationService();
 
             desktop.MainWindow = new MainWindow
@@ -37,6 +35,7 @@ public partial class App : Application
                     chatService,
                     authenticationService,
                     cookiePersistenceService,
+                    settingsPersistenceService,
                     desktopNotificationService),
             };
 

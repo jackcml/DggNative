@@ -76,29 +76,60 @@
                 BorderBrush="{DynamicResource ChatInputBorderBrush}"
                 BorderThickness="0 1 0 0"
                 Padding="8">
-            <Panel>
-                <!-- Login button when not authenticated -->
-                <Button Name="LoginButton"
-                        Content="Login to chat"
-                        HorizontalAlignment="Stretch"
-                        HorizontalContentAlignment="Center"
-                        Click="LoginButton_OnClick"
-                        IsVisible="{Binding !IsLoggedIn}" />
+            <Grid ColumnDefinitions="*,Auto">
+                <Panel Grid.Column="0">
+                    <!-- Login button when not authenticated (official server) -->
+                    <Button Name="LoginButton"
+                            Content="Login to chat"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Center"
+                            Click="LoginButton_OnClick"
+                            IsVisible="{Binding ShowLoginButton}" />
 
-                <!-- Message input when authenticated -->
-                <Grid ColumnDefinitions="*,Auto"
-                      IsVisible="{Binding IsLoggedIn}">
-                    <TextBox Grid.Column="0"
-                             Name="MessageInput"
-                             KeyDown="MessageInput_OnKeyDown"
-                             Watermark="{Binding LocalUser.Nick, StringFormat='Write something {0}...', FallbackValue='Write something...'}" />
-                    <Button Grid.Column="1"
-                            Content="Logout"
-                            Click="LogoutButton_OnClick"
-                            Margin="8,0,0,0"
-                            VerticalAlignment="Stretch" />
-                </Grid>
-            </Panel>
+                    <!-- Nick prompt when not joined (custom server) -->
+                    <Grid RowDefinitions="Auto,Auto"
+                          ColumnDefinitions="*,Auto"
+                          IsVisible="{Binding ShowJoinBar}">
+                        <TextBox Grid.Row="0" Grid.Column="0"
+                                 Name="NickInput"
+                                 Text="{Binding NickInput, Mode=TwoWay}"
+                                 KeyDown="NickInput_OnKeyDown"
+                                 Watermark="Pick a nick..." />
+                        <Button Grid.Row="0" Grid.Column="1"
+                                Content="Join"
+                                Click="JoinButton_OnClick"
+                                Margin="8,0,0,0"
+                                VerticalAlignment="Stretch" />
+                        <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+                                   Text="{Binding JoinError}"
+                                   Foreground="Red"
+                                   TextWrapping="Wrap"
+                                   Margin="0,4,0,0"
+                                   IsVisible="{Binding JoinError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                    </Grid>
+
+                    <!-- Message input when authenticated -->
+                    <Grid ColumnDefinitions="*,Auto"
+                          IsVisible="{Binding IsLoggedIn}">
+                        <TextBox Grid.Column="0"
+                                 Name="MessageInput"
+                                 KeyDown="MessageInput_OnKeyDown"
+                                 Watermark="{Binding LocalUser.Nick, StringFormat='Write something {0}...', FallbackValue='Write something...'}" />
+                        <Button Grid.Column="1"
+                                Content="{Binding LogoutButtonText}"
+                                Click="LogoutButton_OnClick"
+                                Margin="8,0,0,0"
+                                VerticalAlignment="Stretch" />
+                    </Grid>
+                </Panel>
+
+                <Button Grid.Column="1"
+                        Name="SettingsButton"
+                        Content="⚙"
+                        Click="SettingsButton_OnClick"
+                        Margin="8,0,0,0"
+                        VerticalAlignment="Top" />
+            </Grid>
         </Border>
     </Grid>
 </Window>

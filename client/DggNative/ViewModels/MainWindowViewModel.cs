@@ -21,7 +21,11 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly WebSocketChatService _chatService;
     private readonly AuthenticationService _authService;
     private readonly CookiePersistenceService _cookiePersistence;
+    private readonly SettingsPersistenceService _settingsPersistence;
     private readonly IDesktopNotificationService _desktopNotifications;
+
+    private AppSettings _settings = new();
+    private ChatServerConfig _config = new(ChatServerConfig.OfficialUri, ChatAuthMode.Cookie);
 
     [ObservableProperty] private bool _isConnected;
 
@@ -29,9 +33,26 @@ public partial class MainWindowViewModel : ObservableObject
 
     [ObservableProperty] private User? _localUser;
 
-    [ObservableProperty] private bool _isLoggedIn;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowLoginButton))]
+    [NotifyPropertyChangedFor(nameof(ShowJoinBar))]
+    private bool _isLoggedIn;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowLoginButton))]
+    [NotifyPropertyChangedFor(nameof(ShowJoinBar))]
+    [NotifyPropertyChangedFor(nameof(LogoutButtonText))]
+    private bool _isCustomServer;
+
+    [ObservableProperty] private string _nickInput = string.Empty;
+
+    [ObservableProperty] private string? _joinError;
 
     [ObservableProperty] private bool _isWindowFocused = true;
+
+    public bool ShowLoginButton => !IsLoggedIn && !IsCustomServer;
+    public bool ShowJoinBar => !IsLoggedIn && IsCustomServer;
+    public string LogoutButtonText => IsCustomServer ? "Leave" : "Logout";
 
     public AvaloniaList<ChatMessage> MessageList { get; } = [];
 
@@ -41,11 +62,13 @@ public partial class MainWindowViewModel : ObservableObject
         WebSocketChatService chatService,
         AuthenticationService authService,
         CookiePersistenceService cookiePersistence,
+        SettingsPersistenceService settingsPersistence,
         IDesktopNotificationService desktopNotifications)
     {
         _chatService = chatService;
         _authService = authService;
         _cookiePersistence = cookiePersistence;
+        _settingsPersistence = settingsPersistence;
         _desktopNotifications = desktopNotifications;
         _desktopNotifications.NotificationActivated += (_, _) =>
             MentionNotificationActivated?.Invoke(this, EventArgs.Empty);
@@ -71,7 +94,12 @@ public partial class MainWindowViewModel : ObservableObject
             });
 
         chatService.MessageStream.OfType<MeMessage>().ObserveOn(new AvaloniaSynchronizationContext())
-            .Subscribe(item => LocalUser = item.User);
+            .Subscribe(item =>
+            {
+                LocalUser = item.User;
+                IsLoggedIn = true;
+                JoinError = null;
+            });
 
         chatService.IsConnected.ObserveOn(new AvaloniaSynchronizationContext()).Subscribe(status =>
         {
@@ -82,20 +110,43 @@ public partial class MainWindowViewModel : ObservableObject
                 ConnectionStatusDisconnected => "Disconnected",
                 ConnectionStatusConnecting => "Connecting...",
                 ConnectionStatusRetrying r => $"Retrying in {Math.Ceiling(r.MillisecondsUntilRetry / 1000.0)}s...",
+                ConnectionStatusRejected r => $"Rejected: {r.Reason}",
                 _ => "Unknown"
             };
+
+            if (status is ConnectionStatusRejected rejected && IsCustomServer)
+            {
+                // Latch the reason: the reconnect loop immediately moves on to Retrying,
+                // so ConnectionStatusText alone would flash past the user.
+                JoinError = rejected.Reason;
+                IsLoggedIn = false;
+                LocalUser = null;
+            }
         });
 
-        // Try to load persisted cookies, then connect
+        // Resolve the server config and persisted credentials, then connect
         Task.Run(async () =>
         {
-            var saved = await _cookiePersistence.LoadAsync();
-            if (saved is { HasCredentials: true })
+            _settings = await _settingsPersistence.LoadAsync() ?? new AppSettings();
+            _config = ChatServerConfig.Resolve(Environment.GetEnvironmentVariable("wsurl"), _settings);
+
+            Dispatcher.UIThread.Post(() =>
             {
-                _chatService.SetAuthCookies(saved);
-                Dispatcher.UIThread.Post(() => IsLoggedIn = true);
+                IsCustomServer = _config.AuthMode == ChatAuthMode.Hello;
+                NickInput = _settings.Nick ?? string.Empty;
+            });
+
+            if (_config.AuthMode == ChatAuthMode.Cookie)
+            {
+                var saved = await _cookiePersistence.LoadAsync();
+                if (saved is { HasCredentials: true })
+                {
+                    _chatService.SetAuthCookies(saved);
+                    Dispatcher.UIThread.Post(() => IsLoggedIn = true);
+                }
             }
 
+            _chatService.Configure(_config);
             await chatService.StartAsync();
         });
     }
@@ -106,6 +157,7 @@ public partial class MainWindowViewModel : ObservableObject
         _chatService = null!;
         _authService = null!;
         _cookiePersistence = null!;
+        _settingsPersistence = null!;
         _desktopNotifications = null!;
     }
 
@@ -126,12 +178,81 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private async Task LogoutAsync()
     {
-        _chatService.SetAuthCookies(null);
+        if (IsCustomServer)
+        {
+            // Leave: drop the claimed nick (the persisted nick stays for pre-fill)
+            _config = _config with { HelloNick = null };
+            _chatService.Configure(_config);
+        }
+        else
+        {
+            _chatService.SetAuthCookies(null);
+            _cookiePersistence.Clear();
+        }
+
         IsLoggedIn = false;
         LocalUser = null;
-        _cookiePersistence.Clear();
 
         // Reconnect anonymously
+        await Task.Run(_chatService.ReconnectAsync);
+    }
+
+    [RelayCommand]
+    private async Task JoinAsync()
+    {
+        var nick = NickInput.Trim();
+        if (!OutboundFrames.IsValidNick(nick))
+        {
+            JoinError = "Nick must be 1-32 chars and use letters, numbers, underscores, or hyphens.";
+            return;
+        }
+
+        JoinError = null;
+        NickInput = nick;
+        _settings = _settings with { Nick = nick };
+        await _settingsPersistence.SaveAsync(_settings);
+
+        _config = _config with { HelloNick = nick };
+        _chatService.Configure(_config);
+        await Task.Run(_chatService.ReconnectAsync);
+    }
+
+    [RelayCommand]
+    private async Task OpenSettingsAsync(Window owner)
+    {
+        var dialog = new Views.SettingsWindow
+        {
+            DataContext = new SettingsWindowViewModel(_settings, Environment.GetEnvironmentVariable("wsurl")),
+        };
+
+        var result = await dialog.ShowDialog<AppSettings?>(owner);
+        if (result == null) return;
+
+        _settings = result;
+        await _settingsPersistence.SaveAsync(_settings);
+
+        var newConfig = ChatServerConfig.Resolve(Environment.GetEnvironmentVariable("wsurl"), _settings);
+        if (newConfig.ServerUri == _config.ServerUri && newConfig.AuthMode == _config.AuthMode) return;
+
+        _config = newConfig;
+        MessageList.Clear();
+        IsLoggedIn = false;
+        LocalUser = null;
+        JoinError = null;
+        IsCustomServer = _config.AuthMode == ChatAuthMode.Hello;
+        NickInput = _settings.Nick ?? NickInput;
+
+        if (_config.AuthMode == ChatAuthMode.Cookie)
+        {
+            var saved = await _cookiePersistence.LoadAsync();
+            if (saved is { HasCredentials: true })
+            {
+                _chatService.SetAuthCookies(saved);
+                IsLoggedIn = true;
+            }
+        }
+
+        _chatService.Configure(_config);
         await Task.Run(_chatService.ReconnectAsync);
     }
 
