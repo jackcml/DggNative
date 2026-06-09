@@ -1,32 +1,41 @@
-export type FrameType =
-  | "HELLO"
-  | "MSG"
-  | "JOIN"
-  | "QUIT"
-  | "UPDATEUSER"
-  | "HISTORY"
-  | "ME"
-  | "NAMES";
+import { z } from "zod";
 
-export type User = {
-  id: number;
-  nick: string;
-  roles: string[];
-  features: string[];
-  createdDate: string;
-  watching: Watching | null;
-  subscription: Subscription | null;
-};
+export const FrameTypeSchema = z.enum([
+  "HELLO",
+  "MSG",
+  "JOIN",
+  "QUIT",
+  "UPDATEUSER",
+  "HISTORY",
+  "ME",
+  "NAMES",
+]);
 
-export type Watching = {
-  platform: string;
-  id: string;
-};
+export type FrameType = z.infer<typeof FrameTypeSchema>;
 
-export type Subscription = {
-  tier: number;
-  source: string;
-};
+export const WatchingSchema = z.object({
+  platform: z.string(),
+  id: z.string(),
+});
+
+export const SubscriptionSchema = z.object({
+  tier: z.number(),
+  source: z.string(),
+});
+
+export const UserSchema = z.object({
+  id: z.number(),
+  nick: z.string(),
+  roles: z.array(z.string()),
+  features: z.array(z.string()),
+  createdDate: z.string(),
+  watching: WatchingSchema.nullable(),
+  subscription: SubscriptionSchema.nullable(),
+});
+
+export type User = z.infer<typeof UserSchema>;
+export type Watching = z.infer<typeof WatchingSchema>;
+export type Subscription = z.infer<typeof SubscriptionSchema>;
 
 export type ChatMessagePayload = User & {
   timestamp: number;
@@ -49,6 +58,21 @@ export type ParsedFrame = {
 
 const NickPattern = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,31}$/;
 
+export const HelloPayloadSchema = z.object({
+  nick: z
+    .string({ error: "HELLO payload must include a nick string." })
+    .trim()
+    .regex(NickPattern, "Nick must be 1-32 chars and use letters, numbers, underscores, or hyphens."),
+});
+
+export const ChatPayloadSchema = z.object({
+  data: z
+    .string({ error: "MSG payload must include a data string." })
+    .trim()
+    .min(1, "MSG data cannot be empty.")
+    .max(512, "MSG data cannot exceed 512 characters."),
+});
+
 export function formatFrame(type: FrameType, payload: unknown): string {
   return `${type} ${JSON.stringify(payload)}`;
 }
@@ -69,33 +93,11 @@ export function parseFrame(input: string): ParsedFrame {
 }
 
 export function readHelloNick(payload: unknown): string {
-  if (!isRecord(payload) || typeof payload.nick !== "string") {
-    throw new Error("HELLO payload must include a nick string.");
-  }
-
-  const nick = payload.nick.trim();
-  if (!NickPattern.test(nick)) {
-    throw new Error("Nick must be 1-32 chars and use letters, numbers, underscores, or hyphens.");
-  }
-
-  return nick;
+  return parsePayload(HelloPayloadSchema, payload, "HELLO").nick;
 }
 
 export function readChatData(payload: unknown): string {
-  if (!isRecord(payload) || typeof payload.data !== "string") {
-    throw new Error("MSG payload must include a data string.");
-  }
-
-  const data = payload.data.trim();
-  if (data.length === 0) {
-    throw new Error("MSG data cannot be empty.");
-  }
-
-  if (data.length > 512) {
-    throw new Error("MSG data cannot exceed 512 characters.");
-  }
-
-  return data;
+  return parsePayload(ChatPayloadSchema, payload, "MSG").data;
 }
 
 export function createUser(id: number, nick: string, now = new Date()): User {
@@ -110,6 +112,16 @@ export function createUser(id: number, nick: string, now = new Date()): User {
   };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+function parsePayload<Schema extends z.ZodType>(
+  schema: Schema,
+  payload: unknown,
+  frameType: FrameType,
+): z.infer<Schema> {
+  const result = schema.safeParse(payload);
+  if (!result.success) {
+    const issue = result.error.issues[0];
+    throw new Error(issue?.message ?? `Invalid ${frameType} payload.`);
+  }
+
+  return result.data;
 }

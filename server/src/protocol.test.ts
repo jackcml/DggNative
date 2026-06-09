@@ -10,13 +10,20 @@ test("formats and parses TYPE json frames", () => {
 
 test("validates hello nick claims", () => {
   assert.equal(readHelloNick({ nick: "jack_1" }), "jack_1");
+  assert.equal(readHelloNick({ nick: " jack_1 " }), "jack_1");
   assert.throws(() => readHelloNick({ nick: "bad nick" }), /Nick must/);
+  assert.throws(() => readHelloNick({ nick: 42 }), /nick string/);
+  assert.throws(() => readHelloNick({}), /nick string/);
+  assert.throws(() => readHelloNick("jack_1"), /expected object/);
 });
 
 test("reads bounded chat message data", () => {
   assert.equal(readChatData({ data: " hello " }), "hello");
   assert.throws(() => readChatData({ data: "" }), /cannot be empty/);
+  assert.throws(() => readChatData({ data: "   " }), /cannot be empty/);
   assert.throws(() => readChatData({ data: "x".repeat(513) }), /cannot exceed/);
+  assert.throws(() => readChatData({ data: null }), /data string/);
+  assert.throws(() => readChatData([]), /expected object/);
 });
 
 test("creates dgg-shaped anonymous users", () => {
