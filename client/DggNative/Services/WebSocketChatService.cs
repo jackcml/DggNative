@@ -14,8 +14,8 @@ public sealed class WebSocketChatService : IChatService
 {
     public const int MaxOutboundBytes = 16 * 1024;
 
-    private readonly BehaviorSubject<ConnectionStatus> _connectionState =
-        new(new ConnectionStatusDisconnected());
+    private readonly BehaviorSubject<ChatSessionState> _sessionState =
+        new(new ChatSessionStopped());
     private readonly Subject<IWebSocketMessage> _messageSubject = new();
     private readonly SemaphoreSlim _controlGate = new(1, 1);
     private readonly SemaphoreSlim _sendGate = new(1, 1);
@@ -52,7 +52,7 @@ public sealed class WebSocketChatService : IChatService
     }
 
     public IObservable<IWebSocketMessage> MessageStream => _messageSubject.AsObservable();
-    public IObservable<ConnectionStatus> IsConnected => _connectionState.AsObservable();
+    public IObservable<ChatSessionState> SessionState => _sessionState.AsObservable();
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
@@ -88,7 +88,7 @@ public sealed class WebSocketChatService : IChatService
         try
         {
             await StopWorkerAsync().ConfigureAwait(false);
-            _connectionState.OnNext(new ConnectionStatusDisconnected());
+            _sessionState.OnNext(new ChatSessionStopped());
         }
         finally { _controlGate.Release(); }
     }
@@ -157,7 +157,7 @@ public sealed class WebSocketChatService : IChatService
                 IChatWebSocket? socket = null;
                 try
                 {
-                    _connectionState.OnNext(new ConnectionStatusConnecting());
+                    _sessionState.OnNext(new ChatSessionConnecting());
                     ChatServerConfig config;
                     AuthCookies? cookies;
                     lock (_settingsGate) { config = _config; cookies = _authCookies; }
@@ -165,14 +165,22 @@ public sealed class WebSocketChatService : IChatService
                     socket = _socketFactory.Create(config, cookies);
                     Volatile.Write(ref _activeSocket, socket);
                     await socket.ConnectAsync(config.ServerUri, cancellationToken).ConfigureAwait(false);
-                    _connectionState.OnNext(new ConnectionStatusConnected());
                     firstAttempt.TrySetResult(ConnectionAttemptResult.Connected);
                     retryAttempts = 0;
 
                     if (config is { AuthMode: ChatAuthMode.Hello, HelloNick: not null })
                     {
+                        _sessionState.OnNext(new ChatSessionAuthenticating());
                         var hello = Encoding.UTF8.GetBytes(OutboundFrames.Hello(config.HelloNick));
                         await SendOnSocketAsync(socket, hello, cancellationToken).ConfigureAwait(false);
+                    }
+                    else if (config.AuthMode == ChatAuthMode.Cookie && CredentialsAvailable(cookies))
+                    {
+                        _sessionState.OnNext(new ChatSessionAuthenticating());
+                    }
+                    else
+                    {
+                        _sessionState.OnNext(new ChatSessionGuest());
                     }
 
                     await ReceiveLoopAsync(socket, cancellationToken).ConfigureAwait(false);
@@ -195,7 +203,6 @@ public sealed class WebSocketChatService : IChatService
                 }
 
                 if (cancellationToken.IsCancellationRequested) break;
-                _connectionState.OnNext(new ConnectionStatusDisconnected());
                 var delayMs = checked((int)_reconnectPolicy.GetDelay(retryAttempts, _random).TotalMilliseconds);
                 retryAttempts++;
                 await DelayWithCountdownAsync(delayMs, cancellationToken).ConfigureAwait(false);
@@ -217,12 +224,6 @@ public sealed class WebSocketChatService : IChatService
             var result = await socket.ReceiveAsync(buffer, cancellationToken).ConfigureAwait(false);
             if (result.MessageType == WebSocketMessageType.Close)
             {
-                if (socket.CloseStatus == WebSocketCloseStatus.PolicyViolation)
-                {
-                    lock (_settingsGate) _config = _config with { HelloNick = null };
-                    _connectionState.OnNext(new ConnectionStatusRejected(
-                        socket.CloseStatusDescription ?? "Rejected by server"));
-                }
                 try
                 {
                     await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, CancellationToken.None)
@@ -247,6 +248,8 @@ public sealed class WebSocketChatService : IChatService
         try
         {
             var message = WebSocketMessageFactory.Create(type, bytes.AsSpan(spaceIndex + 1));
+            if (message is MeMessage) _sessionState.OnNext(new ChatSessionReady());
+            if (message is ErrorMessage error) ApplyNativeError(error);
             if (message != null) _messageSubject.OnNext(message);
         }
         catch (Exception ex) { ReportFailure("parse", ex); }
@@ -256,7 +259,7 @@ public sealed class WebSocketChatService : IChatService
     {
         while (delayMs > 0)
         {
-            _connectionState.OnNext(new ConnectionStatusRetrying(delayMs));
+            _sessionState.OnNext(new ChatSessionRetrying(delayMs));
             var step = Math.Min(250, delayMs);
             await Task.Delay(TimeSpan.FromMilliseconds(step), _timeProvider, cancellationToken)
                 .ConfigureAwait(false);
@@ -290,6 +293,25 @@ public sealed class WebSocketChatService : IChatService
     private static void LogFailure(ChatConnectionFailure failure) =>
         Console.Error.WriteLine($"chat_connection_failure operation={failure.Operation} category={failure.Category}");
 
+    private void ApplyNativeError(ErrorMessage error)
+    {
+        switch (error.Code)
+        {
+            case NativeErrorCodes.NickInUse when _sessionState.Value is ChatSessionAuthenticating:
+                lock (_settingsGate) _config = _config with { HelloNick = null };
+                _sessionState.OnNext(new ChatSessionRejected(error.Code, error.Message));
+                break;
+            case NativeErrorCodes.IdentificationRequired:
+                _sessionState.OnNext(new ChatSessionGuest());
+                break;
+        }
+    }
+
+    private static bool CredentialsAvailable(AuthCookies? cookies) =>
+        cookies is { HasCredentials: true }
+        || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("sid"))
+        || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("rememberme"));
+
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
 
     public async ValueTask DisposeAsync()
@@ -298,9 +320,9 @@ public sealed class WebSocketChatService : IChatService
         await StopAsync().ConfigureAwait(false);
         _disposed = true;
         _messageSubject.OnCompleted();
-        _connectionState.OnCompleted();
+        _sessionState.OnCompleted();
         _messageSubject.Dispose();
-        _connectionState.Dispose();
+        _sessionState.Dispose();
         _controlGate.Dispose();
         _sendGate.Dispose();
         GC.SuppressFinalize(this);

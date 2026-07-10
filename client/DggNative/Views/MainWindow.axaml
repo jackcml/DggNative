@@ -60,11 +60,14 @@
                     ZIndex="1" />
         </Grid>
 
-        <!-- Connecting overlay -->
+        <!-- Non-modal connection status: history remains visible during reconnects. -->
         <Border Grid.Row="0" Background="{DynamicResource ChatOverlayBackgroundBrush}"
-                IsVisible="{Binding !IsConnected}">
-            <StackPanel VerticalAlignment="Center"
-                        HorizontalAlignment="Center">
+                IsVisible="{Binding ShowConnectionBanner}"
+                VerticalAlignment="Top"
+                HorizontalAlignment="Stretch"
+                Padding="8"
+                ZIndex="2">
+            <StackPanel HorizontalAlignment="Center">
                 <TextBlock Text="{Binding ConnectionStatusText}"
                            FontSize="16"
                            Foreground="{DynamicResource ChatOverlayForegroundBrush}" />
@@ -109,7 +112,7 @@
                     </Grid>
 
                     <!-- Message input when authenticated -->
-                    <Grid ColumnDefinitions="*,Auto"
+                    <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto"
                           IsVisible="{Binding IsLoggedIn}">
                         <TextBox Grid.Column="0"
                                  Name="MessageInput"
@@ -120,6 +123,12 @@
                                 Click="LogoutButton_OnClick"
                                 Margin="8,0,0,0"
                                 VerticalAlignment="Stretch" />
+                        <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+                                   Text="{Binding SendError}"
+                                   Foreground="Red"
+                                   TextWrapping="Wrap"
+                                   Margin="0,4,0,0"
+                                   IsVisible="{Binding SendError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                     </Grid>
                 </Panel>
 

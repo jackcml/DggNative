@@ -28,16 +28,19 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     private AppSettings _settings = new();
     private ChatServerConfig _config = new(ChatServerConfig.OfficialUri, ChatAuthMode.Cookie);
 
-    [ObservableProperty] private bool _isConnected;
-
-    [ObservableProperty] private string _connectionStatusText = "Disconnected";
-
     [ObservableProperty] private User? _localUser;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowLoginButton))]
     [NotifyPropertyChangedFor(nameof(ShowJoinBar))]
-    private bool _isLoggedIn;
+    [NotifyPropertyChangedFor(nameof(IsLoggedIn))]
+    [NotifyPropertyChangedFor(nameof(ShowConnectionBanner))]
+    [NotifyPropertyChangedFor(nameof(ConnectionStatusText))]
+    private ChatSessionState _sessionState = new ChatSessionStopped();
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowLoginButton))]
+    private bool _credentialsAvailable;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowLoginButton))]
@@ -49,10 +52,27 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
     [ObservableProperty] private string? _joinError;
 
+    [ObservableProperty] private string? _sendError;
+
     [ObservableProperty] private bool _isWindowFocused = true;
 
+    public bool IsLoggedIn => SessionState is ChatSessionReady;
     public bool ShowLoginButton => !IsLoggedIn && !IsCustomServer;
-    public bool ShowJoinBar => !IsLoggedIn && IsCustomServer;
+    public bool ShowJoinBar => IsCustomServer && SessionState is ChatSessionGuest or ChatSessionRejected;
+    public bool ShowConnectionBanner => SessionState is ChatSessionStopped or ChatSessionConnecting
+        or ChatSessionRetrying or ChatSessionRejected;
+    public string ConnectionStatusText => SessionState switch
+    {
+        ChatSessionStopped => "Disconnected",
+        ChatSessionConnecting => "Connecting...",
+        ChatSessionGuest => "Connected as guest",
+        ChatSessionAuthenticating => "Identifying...",
+        ChatSessionReady => "Connected",
+        ChatSessionRetrying retrying =>
+            $"Retrying in {Math.Ceiling(retrying.MillisecondsUntilRetry / 1000.0)}s...",
+        ChatSessionRejected rejected => $"Rejected: {rejected.Message}",
+        _ => "Unknown",
+    };
     public string LogoutButtonText => IsCustomServer ? "Leave" : "Logout";
 
     public AvaloniaList<ChatMessage> MessageList { get; } = [];
@@ -98,31 +118,27 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             .Subscribe(item =>
             {
                 LocalUser = item.User;
-                IsLoggedIn = true;
                 JoinError = null;
             }));
 
-        _subscriptions.Add(chatService.IsConnected.ObserveOn(new AvaloniaSynchronizationContext()).Subscribe(status =>
+        _subscriptions.Add(chatService.MessageStream.OfType<ErrorMessage>()
+            .ObserveOn(new AvaloniaSynchronizationContext()).Subscribe(error =>
         {
-            IsConnected = status is ConnectionStatusConnected;
-            ConnectionStatusText = status switch
+            if (error.Code == NativeErrorCodes.NickInUse)
             {
-                ConnectionStatusConnected => "Connected",
-                ConnectionStatusDisconnected => "Disconnected",
-                ConnectionStatusConnecting => "Connecting...",
-                ConnectionStatusRetrying r => $"Retrying in {Math.Ceiling(r.MillisecondsUntilRetry / 1000.0)}s...",
-                ConnectionStatusRejected r => $"Rejected: {r.Reason}",
-                _ => "Unknown"
-            };
-
-            if (status is ConnectionStatusRejected rejected && IsCustomServer)
-            {
-                // Latch the reason: the reconnect loop immediately moves on to Retrying,
-                // so ConnectionStatusText alone would flash past the user.
-                JoinError = rejected.Reason;
-                IsLoggedIn = false;
-                LocalUser = null;
+                JoinError = error.Message;
             }
+            else
+            {
+                SendError = error.Message;
+            }
+        }));
+
+        _subscriptions.Add(chatService.SessionState.ObserveOn(new AvaloniaSynchronizationContext()).Subscribe(state =>
+        {
+            SessionState = state;
+            if (state is not ChatSessionReady) LocalUser = null;
+            if (state is ChatSessionRejected rejected) JoinError = rejected.Message;
         }));
 
         // Resolve the server config and persisted credentials, then connect
@@ -143,7 +159,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
                 if (saved is { HasCredentials: true })
                 {
                     _chatService.SetAuthCookies(saved);
-                    Dispatcher.UIThread.Post(() => IsLoggedIn = true);
+                    Dispatcher.UIThread.Post(() => CredentialsAvailable = true);
                 }
             }
 
@@ -169,7 +185,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         if (cookies == null) return;
 
         _chatService.SetAuthCookies(cookies);
-        IsLoggedIn = true;
+        CredentialsAvailable = true;
         await _cookiePersistence.SaveAsync(cookies);
 
         // Reconnect with the new credentials
@@ -191,8 +207,8 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             _cookiePersistence.Clear();
         }
 
-        IsLoggedIn = false;
         LocalUser = null;
+        if (!IsCustomServer) CredentialsAvailable = false;
 
         // Reconnect anonymously
         await _chatService.ReconnectAsync();
@@ -237,7 +253,6 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
         _config = newConfig;
         MessageList.Clear();
-        IsLoggedIn = false;
         LocalUser = null;
         JoinError = null;
         IsCustomServer = _config.AuthMode == ChatAuthMode.Hello;
@@ -249,7 +264,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             if (saved is { HasCredentials: true })
             {
                 _chatService.SetAuthCookies(saved);
-                IsLoggedIn = true;
+                CredentialsAvailable = true;
             }
         }
 
@@ -257,13 +272,21 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         await _chatService.ReconnectAsync();
     }
 
-    public async Task SendChatMessageAsync(string message)
+    public async Task<bool> SendChatMessageAsync(string message)
     {
-        if (!IsConnected || !IsLoggedIn || string.IsNullOrWhiteSpace(message) || message.Length > 512 ||
-            LocalUser == null)
-            return;
+        if (!IsLoggedIn || string.IsNullOrWhiteSpace(message) || message.Length > 512 || LocalUser == null)
+            return false;
 
-        await _chatService.SendMessageAsync(OutboundFrames.Msg(LocalUser, message), CancellationToken.None);
+        var result = await _chatService.SendMessageAsync(
+            OutboundFrames.Msg(LocalUser, message), CancellationToken.None);
+        SendError = result switch
+        {
+            SendResult.AcceptedForSend => null,
+            SendResult.NotReady => "Chat is not ready. Your message was not sent.",
+            SendResult.TooLarge => "That message is too large to send.",
+            _ => "The message could not be sent. Please try again.",
+        };
+        return result == SendResult.AcceptedForSend;
     }
 
     private void TrimBufferedMessages()

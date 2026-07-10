@@ -46,6 +46,10 @@ A client must claim a nickname before sending chat:
 HELLO {"nick":"jack"}
 ```
 
+Connections begin as guests. Guests receive live `JOIN`, `QUIT`, and `MSG`
+events but cannot publish chat or claim a place in the named-user list until a
+`HELLO` succeeds.
+
 The server validates that the nick is 1-32 characters, starts with a letter,
 number, or underscore, and then contains only letters, numbers, underscores, or
 hyphens. Nicknames are unique case-insensitively while connected.
@@ -78,6 +82,25 @@ On disconnect, the server broadcasts:
 ```text
 QUIT {...user,"timestamp":...}
 ```
+
+Application errors use a structured frame rather than overloading WebSocket
+close descriptions:
+
+```text
+ERROR {"code":"IDENTIFICATION_REQUIRED","message":"Choose a nickname before sending chat."}
+```
+
+The Native V1 error registry and current client behavior are:
+
+| Code | Client behavior |
+|---|---|
+| `NICK_IN_USE` | Reject the current identification attempt, clear only that attempted nick, and allow another claim. |
+| `IDENTIFICATION_REQUIRED` | Remain connected as a guest and preserve the unsent composer text. |
+| `INVALID_FRAME` | Treat a terminal malformed connection as retryable; do not interpret it as a nick conflict. |
+| `INVALID_MESSAGE` | Remain in the current session and show the message-level failure. |
+| `INPUT_TOO_LARGE` | Preserve input and report that it exceeds the transport limit. |
+| `RATE_LIMITED` | Preserve input and report the temporary refusal. |
+| `SERVER_SHUTDOWN` / `INTERNAL_ERROR` | Clear the active identity and enter the normal retry lifecycle. |
 
 ## Current Limitations
 

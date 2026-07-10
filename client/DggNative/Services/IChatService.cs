@@ -33,5 +33,5 @@ public interface IChatService : IDisposable, IAsyncDisposable
     void SetAuthCookies(AuthCookies? cookies);
 
     IObservable<IWebSocketMessage> MessageStream { get; }
-    IObservable<ConnectionStatus> IsConnected { get; }
+    IObservable<ChatSessionState> SessionState { get; }
 }

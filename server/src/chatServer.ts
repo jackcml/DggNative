@@ -2,8 +2,10 @@ import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "node:net";
 import {
   ChatMessagePayload,
+  ErrorPayload,
   FrameType,
   NamesPayload,
+  NativeErrorCode,
   PresencePayload,
   User,
   createUser,
@@ -18,15 +20,8 @@ import {
 // for the currently accepted DGG-shaped MSG without permitting unbounded frames.
 export const MaxPayloadBytes = 16 * 1024;
 
-const CloseReason = {
-  BinaryFrame: "BINARY_NOT_SUPPORTED",
-  InvalidFrame: "INVALID_FRAME",
-  InvalidMessage: "INVALID_MESSAGE",
-  RepeatedHello: "HELLO_ALREADY_ACCEPTED",
-  IdentificationRequired: "IDENTIFICATION_REQUIRED",
-  NickInUse: "NICK_IN_USE",
+const DebugReason = {
   PayloadTooLarge: "PAYLOAD_TOO_LARGE",
-  UnknownType: "UNKNOWN_FRAME_TYPE",
 } as const;
 
 export type ChatServerOptions = {
@@ -45,10 +40,12 @@ export type InboundRejection = {
 
 class InboundError extends Error {
   constructor(
-    readonly reason: string,
+    readonly code: NativeErrorCode,
+    message: string,
+    readonly terminal: boolean,
     readonly frameType?: string,
   ) {
-    super(reason);
+    super(message);
   }
 }
 
@@ -119,7 +116,7 @@ export class ChatServer {
   private handleConnection(socket: WebSocket): void {
     socket.on("message", (data, isBinary) => {
       if (isBinary) {
-        this.reject(socket, new InboundError(CloseReason.BinaryFrame));
+        this.reject(socket, new InboundError(NativeErrorCode.InvalidFrame, "Binary frames are not supported.", true));
         return;
       }
 
@@ -128,7 +125,9 @@ export class ChatServer {
       } catch (error) {
         this.reject(
           socket,
-          error instanceof InboundError ? error : new InboundError(CloseReason.InvalidFrame),
+          error instanceof InboundError
+            ? error
+            : new InboundError(NativeErrorCode.InvalidFrame, "The frame is invalid.", true),
         );
       }
     });
@@ -136,7 +135,7 @@ export class ChatServer {
     socket.on("close", () => this.handleClose(socket));
     socket.on("error", (error) => {
       if ((error as NodeJS.ErrnoException).code === "WS_ERR_UNSUPPORTED_MESSAGE_LENGTH") {
-        this.debugRejection(CloseReason.PayloadTooLarge);
+        this.debugRejection(DebugReason.PayloadTooLarge);
         return;
       }
       this.options.onError?.(error);
@@ -148,11 +147,11 @@ export class ChatServer {
     try {
       frame = parseFrame(rawFrame);
     } catch {
-      throw new InboundError(CloseReason.InvalidFrame);
+      throw new InboundError(NativeErrorCode.InvalidFrame, "The frame is invalid.", true);
     }
 
     if (frame.type !== "HELLO" && frame.type !== "MSG") {
-      throw new InboundError(CloseReason.UnknownType, frame.type);
+      throw new InboundError(NativeErrorCode.InvalidFrame, "The frame type is not supported.", true, frame.type);
     }
 
     if (frame.type === "HELLO") {
@@ -160,32 +159,47 @@ export class ChatServer {
         this.handleHello(socket, frame.payload);
       } catch (error) {
         if (error instanceof InboundError) throw error;
-        throw new InboundError(CloseReason.InvalidMessage, frame.type);
+        throw new InboundError(NativeErrorCode.InvalidMessage, "The HELLO payload is invalid.", false, frame.type);
       }
       return;
     }
 
     const session = this.sessions.get(socket);
     if (!session) {
-      throw new InboundError(CloseReason.IdentificationRequired, frame.type);
+      throw new InboundError(
+        NativeErrorCode.IdentificationRequired,
+        "Choose a nickname before sending chat.",
+        false,
+        frame.type,
+      );
     }
 
     try {
       this.handleMessage(session, frame.payload);
     } catch {
-      throw new InboundError(CloseReason.InvalidMessage, frame.type);
+      throw new InboundError(NativeErrorCode.InvalidMessage, "The chat message is invalid.", false, frame.type);
     }
   }
 
   private handleHello(socket: WebSocket, payload: unknown): void {
     if (this.sessions.has(socket)) {
-      throw new InboundError(CloseReason.RepeatedHello, "HELLO");
+      throw new InboundError(
+        NativeErrorCode.InvalidMessage,
+        "This connection already has a nickname.",
+        false,
+        "HELLO",
+      );
     }
 
     const nick = readHelloNick(payload);
     const normalizedNick = nick.toLowerCase();
     if (this.nicks.has(normalizedNick)) {
-      throw new InboundError(CloseReason.NickInUse, "HELLO");
+      throw new InboundError(
+        NativeErrorCode.NickInUse,
+        "That nickname is already in use.",
+        false,
+        "HELLO",
+      );
     }
 
     const session: Session = {
@@ -229,8 +243,10 @@ export class ChatServer {
   }
 
   private reject(socket: WebSocket, error: InboundError): void {
-    this.debugRejection(error.reason, error.frameType);
-    this.safeClose(socket, 1008, error.reason);
+    this.debugRejection(error.code, error.frameType);
+    const payload: ErrorPayload = { code: error.code, message: error.message };
+    this.send(socket, "ERROR", payload);
+    if (error.terminal) this.safeClose(socket, 1008, error.code);
   }
 
   private debugRejection(reason: string, frameType?: string): void {
@@ -253,7 +269,7 @@ export class ChatServer {
 
   private createNamesPayload(): NamesPayload {
     return {
-      connectioncount: this.sessions.size,
+      connectioncount: this.wss.clients.size,
       users: [...this.sessions.values()].map((session) => session.user),
     };
   }

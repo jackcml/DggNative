@@ -1,4 +1,7 @@
 using System.Net.WebSockets;
+using System.Reactive.Linq;
+using System.Text;
+using System.Threading.Channels;
 using DggNative.Models;
 using DggNative.Services;
 
@@ -157,8 +160,85 @@ public class WebSocketChatServiceTest
         await Assert.ThrowsAsync<ObjectDisposedException>(() => service.StartAsync());
     }
 
-    private static WebSocketChatService CreateService(FakeSocketFactory factory) =>
-        new(Config, factory, new BlockingTimeProvider(), new FixedRandom());
+    [Fact]
+    public async Task SessionEntersGuestWithoutIdentityAndReadyOnlyAfterMe()
+    {
+        var factory = new FakeSocketFactory();
+        await using var service = CreateService(factory);
+        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var subscription = service.SessionState.Subscribe(state =>
+        {
+            if (state is ChatSessionReady) ready.TrySetResult();
+        });
+
+        await service.ReconnectAsync();
+        Assert.IsType<ChatSessionGuest>(await service.SessionState.FirstAsync());
+
+        factory.Sockets.Single().EmitText(
+            "ME {\"id\":1,\"nick\":\"jack\",\"roles\":[],\"features\":[],\"createdDate\":\"2026-01-01T00:00:00Z\",\"watching\":null,\"subscription\":null}");
+        await ready.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        Assert.IsType<ChatSessionReady>(await service.SessionState.FirstAsync());
+    }
+
+    [Fact]
+    public async Task NickConflictRejectsIdentificationAndOnlyThenClearsTheNick()
+    {
+        var factory = new FakeSocketFactory();
+        await using var service = CreateService(factory, Config with { HelloNick = "taken" });
+        var rejected = new TaskCompletionSource<ChatSessionRejected>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        using var subscription = service.SessionState.OfType<ChatSessionRejected>()
+            .Subscribe(state => rejected.TrySetResult(state));
+
+        await service.ReconnectAsync();
+        Assert.IsType<ChatSessionAuthenticating>(await service.SessionState.FirstAsync());
+        factory.Sockets.Single().EmitText(
+            "ERROR {\"code\":\"NICK_IN_USE\",\"message\":\"That nickname is already in use.\"}");
+
+        Assert.Equal(NativeErrorCodes.NickInUse,
+            (await rejected.Task.WaitAsync(TimeSpan.FromSeconds(1))).Code);
+        await service.ReconnectAsync();
+        Assert.Null(factory.Configs[^1].HelloNick);
+        Assert.IsType<ChatSessionGuest>(await service.SessionState.FirstAsync());
+    }
+
+    [Fact]
+    public async Task PolicyCloseWithoutExplicitConflictDoesNotClearTheNick()
+    {
+        var factory = new FakeSocketFactory();
+        await using var service = CreateService(factory, Config with { HelloNick = "keep_me" });
+        await service.ReconnectAsync();
+
+        factory.Sockets.Single().EmitClose(
+            WebSocketCloseStatus.PolicyViolation, "INVALID_MESSAGE");
+        await service.ReconnectAsync();
+
+        Assert.Equal("keep_me", factory.Configs[^1].HelloNick);
+    }
+
+    [Fact]
+    public async Task IdentificationRequiredMapsBackToGuestWithoutBecomingNickConflict()
+    {
+        var factory = new FakeSocketFactory();
+        await using var service = CreateService(factory, Config with { HelloNick = "jack" });
+        var guest = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var subscription = service.SessionState.Subscribe(state =>
+        {
+            if (state is ChatSessionGuest) guest.TrySetResult();
+        });
+        await service.ReconnectAsync();
+
+        factory.Sockets.Single().EmitText(
+            "ERROR {\"code\":\"IDENTIFICATION_REQUIRED\",\"message\":\"Choose a nickname.\"}");
+
+        await guest.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        Assert.IsType<ChatSessionGuest>(await service.SessionState.FirstAsync());
+        Assert.Equal("jack", factory.Configs.Single().HelloNick);
+    }
+
+    private static WebSocketChatService CreateService(
+        FakeSocketFactory factory, ChatServerConfig? config = null) =>
+        new(config ?? Config, factory, new BlockingTimeProvider(), new FixedRandom());
 
     private sealed class FixedRandom : IReconnectRandom
     {
@@ -186,10 +266,11 @@ public class WebSocketChatServiceTest
 
     private sealed class FakeSocket(bool failConnect, bool blockConnect, bool blockSend) : IChatWebSocket
     {
+        private readonly Channel<ReceiveItem> _received = Channel.CreateUnbounded<ReceiveItem>();
         private int _activeSends;
         public WebSocketState State { get; private set; } = WebSocketState.None;
-        public WebSocketCloseStatus? CloseStatus => null;
-        public string? CloseStatusDescription => null;
+        public WebSocketCloseStatus? CloseStatus { get; private set; }
+        public string? CloseStatusDescription { get; private set; }
         public bool Disposed { get; private set; }
         public int MaxConcurrentSends { get; private set; }
         public TaskCompletionSource SendStarted { get; } =
@@ -208,8 +289,11 @@ public class WebSocketChatServiceTest
         public async Task<WebSocketReceiveResult> ReceiveAsync(
             ArraySegment<byte> buffer, CancellationToken cancellationToken)
         {
-            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
-            throw new InvalidOperationException("Unreachable after infinite delay.");
+            var item = await _received.Reader.ReadAsync(cancellationToken);
+            if (item.Type == WebSocketMessageType.Close)
+                return new WebSocketReceiveResult(0, WebSocketMessageType.Close, true);
+            item.Bytes.AsSpan().CopyTo(buffer.AsSpan());
+            return new WebSocketReceiveResult(item.Bytes.Length, item.Type, true);
         }
 
         public async Task SendAsync(ArraySegment<byte> buffer, WebSocketMessageType messageType,
@@ -235,6 +319,18 @@ public class WebSocketChatServiceTest
             Disposed = true;
             State = WebSocketState.Closed;
         }
+
+        public void EmitText(string frame) =>
+            _received.Writer.TryWrite(new ReceiveItem(Encoding.UTF8.GetBytes(frame), WebSocketMessageType.Text));
+
+        public void EmitClose(WebSocketCloseStatus status, string description)
+        {
+            CloseStatus = status;
+            CloseStatusDescription = description;
+            _received.Writer.TryWrite(new ReceiveItem([], WebSocketMessageType.Close));
+        }
+
+        private sealed record ReceiveItem(byte[] Bytes, WebSocketMessageType Type);
     }
 
     private sealed class BlockingTimeProvider : TimeProvider

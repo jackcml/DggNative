@@ -110,8 +110,7 @@ public partial class MainWindow : Window
         if (e.Key != Key.Enter) return;
 
         var message = textBox.Text;
-        textBox.Clear();
-        await vm.SendChatMessageAsync(message);
+        if (await vm.SendChatMessageAsync(message)) textBox.Clear();
         e.Handled = true;
     }
 

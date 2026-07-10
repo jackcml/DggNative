@@ -24,6 +24,8 @@ public static class WebSocketMessageFactory
                 return JsonSerializer.Deserialize<MeMessage>(ref reader);
             case "NAMES":
                 return JsonSerializer.Deserialize<NamesMessage>(ref reader);
+            case "ERROR":
+                return JsonSerializer.Deserialize<ErrorMessage>(ref reader);
             default:
                 Console.WriteLine($"Unsupported message type `{messageType}`.");
                 return null;

@@ -9,6 +9,7 @@ export const FrameTypeSchema = z.enum([
   "HISTORY",
   "ME",
   "NAMES",
+  "ERROR",
 ]);
 
 export type FrameType = z.infer<typeof FrameTypeSchema>;
@@ -49,6 +50,24 @@ export type PresencePayload = User & {
 export type NamesPayload = {
   connectioncount: number;
   users: User[];
+};
+
+export const NativeErrorCode = {
+  NickInUse: "NICK_IN_USE",
+  IdentificationRequired: "IDENTIFICATION_REQUIRED",
+  InvalidFrame: "INVALID_FRAME",
+  InvalidMessage: "INVALID_MESSAGE",
+  InputTooLarge: "INPUT_TOO_LARGE",
+  RateLimited: "RATE_LIMITED",
+  ServerShutdown: "SERVER_SHUTDOWN",
+  InternalError: "INTERNAL_ERROR",
+} as const;
+
+export type NativeErrorCode = typeof NativeErrorCode[keyof typeof NativeErrorCode];
+
+export type ErrorPayload = {
+  code: NativeErrorCode;
+  message: string;
 };
 
 export type ParsedFrame = {
