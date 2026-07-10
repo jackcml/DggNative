@@ -29,20 +29,22 @@ public partial class App : Application
             var settingsPersistenceService = new SettingsPersistenceService();
             var desktopNotificationService = new DesktopNotificationService();
 
+            var mainViewModel = new MainWindowViewModel(
+                chatService,
+                authenticationService,
+                cookiePersistenceService,
+                settingsPersistenceService,
+                desktopNotificationService);
             desktop.MainWindow = new MainWindow
             {
-                DataContext = new MainWindowViewModel(
-                    chatService,
-                    authenticationService,
-                    cookiePersistenceService,
-                    settingsPersistenceService,
-                    desktopNotificationService),
+                DataContext = mainViewModel,
             };
 
             desktop.Exit += (_, _) =>
             {
                 authenticationService.Dispose();
                 desktopNotificationService.Dispose();
+                mainViewModel.Dispose();
                 chatService.Dispose();
 
                 if (CefRuntime.IsInitialized)

@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using Avalonia.Collections;
 using System.Reactive.Linq;
+using System.Reactive.Disposables;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Controls;
@@ -13,11 +14,12 @@ using DggNative.Services;
 
 namespace DggNative.ViewModels;
 
-public partial class MainWindowViewModel : ObservableObject
+public partial class MainWindowViewModel : ObservableObject, IDisposable
 {
     private const int MaxBufferedMessages = 500;
 
-    private readonly WebSocketChatService _chatService;
+    private readonly IChatService _chatService;
+    private readonly CompositeDisposable _subscriptions = new();
     private readonly AuthenticationService _authService;
     private readonly CookiePersistenceService _cookiePersistence;
     private readonly SettingsPersistenceService _settingsPersistence;
@@ -58,7 +60,7 @@ public partial class MainWindowViewModel : ObservableObject
     public event EventHandler? MentionNotificationActivated;
 
     public MainWindowViewModel(
-        WebSocketChatService chatService,
+        IChatService chatService,
         AuthenticationService authService,
         CookiePersistenceService cookiePersistence,
         SettingsPersistenceService settingsPersistence,
@@ -72,7 +74,7 @@ public partial class MainWindowViewModel : ObservableObject
         _desktopNotifications.NotificationActivated += (_, _) =>
             MentionNotificationActivated?.Invoke(this, EventArgs.Empty);
 
-        chatService.MessageStream.OfType<ChatMessage>().ObserveOn(new AvaloniaSynchronizationContext())
+        _subscriptions.Add(chatService.MessageStream.OfType<ChatMessage>().ObserveOn(new AvaloniaSynchronizationContext())
             .Subscribe(item =>
             {
                 MessageList.Add(item);
@@ -82,25 +84,25 @@ public partial class MainWindowViewModel : ObservableObject
                 {
                     _desktopNotifications.ShowMentionNotification(item);
                 }
-            });
+            }));
 
-        chatService.MessageStream.OfType<HistoryMessage>().ObserveOn(new AvaloniaSynchronizationContext())
+        _subscriptions.Add(chatService.MessageStream.OfType<HistoryMessage>().ObserveOn(new AvaloniaSynchronizationContext())
             .Subscribe(item =>
             {
                 MessageList.Clear();
                 MessageList.AddRange(item.Messages.OfType<ChatMessage>().TakeLast(MaxBufferedMessages));
                 // FIXME: handle other message types if necessary
-            });
+            }));
 
-        chatService.MessageStream.OfType<MeMessage>().ObserveOn(new AvaloniaSynchronizationContext())
+        _subscriptions.Add(chatService.MessageStream.OfType<MeMessage>().ObserveOn(new AvaloniaSynchronizationContext())
             .Subscribe(item =>
             {
                 LocalUser = item.User;
                 IsLoggedIn = true;
                 JoinError = null;
-            });
+            }));
 
-        chatService.IsConnected.ObserveOn(new AvaloniaSynchronizationContext()).Subscribe(status =>
+        _subscriptions.Add(chatService.IsConnected.ObserveOn(new AvaloniaSynchronizationContext()).Subscribe(status =>
         {
             IsConnected = status is ConnectionStatusConnected;
             ConnectionStatusText = status switch
@@ -121,7 +123,7 @@ public partial class MainWindowViewModel : ObservableObject
                 IsLoggedIn = false;
                 LocalUser = null;
             }
-        });
+        }));
 
         // Resolve the server config and persisted credentials, then connect
         Task.Run(async () =>
@@ -145,7 +147,7 @@ public partial class MainWindowViewModel : ObservableObject
                 }
             }
 
-            _chatService.Configure(_config);
+            await _chatService.ConfigureAsync(_config);
             await chatService.StartAsync();
         });
     }
@@ -171,7 +173,7 @@ public partial class MainWindowViewModel : ObservableObject
         await _cookiePersistence.SaveAsync(cookies);
 
         // Reconnect with the new credentials
-        await Task.Run(_chatService.ReconnectAsync);
+        await _chatService.ReconnectAsync();
     }
 
     [RelayCommand]
@@ -181,7 +183,7 @@ public partial class MainWindowViewModel : ObservableObject
         {
             // Leave: drop the claimed nick (the persisted nick stays for pre-fill)
             _config = _config with { HelloNick = null };
-            _chatService.Configure(_config);
+            await _chatService.ConfigureAsync(_config);
         }
         else
         {
@@ -193,7 +195,7 @@ public partial class MainWindowViewModel : ObservableObject
         LocalUser = null;
 
         // Reconnect anonymously
-        await Task.Run(_chatService.ReconnectAsync);
+        await _chatService.ReconnectAsync();
     }
 
     [RelayCommand]
@@ -212,8 +214,8 @@ public partial class MainWindowViewModel : ObservableObject
         await _settingsPersistence.SaveAsync(_settings);
 
         _config = _config with { HelloNick = nick };
-        _chatService.Configure(_config);
-        await Task.Run(_chatService.ReconnectAsync);
+        await _chatService.ConfigureAsync(_config);
+        await _chatService.ReconnectAsync();
     }
 
     [RelayCommand]
@@ -251,8 +253,8 @@ public partial class MainWindowViewModel : ObservableObject
             }
         }
 
-        _chatService.Configure(_config);
-        await Task.Run(_chatService.ReconnectAsync);
+        await _chatService.ConfigureAsync(_config);
+        await _chatService.ReconnectAsync();
     }
 
     public async Task SendChatMessageAsync(string message)
@@ -270,5 +272,11 @@ public partial class MainWindowViewModel : ObservableObject
         {
             MessageList.RemoveAt(0);
         }
+    }
+
+    public void Dispose()
+    {
+        _subscriptions.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

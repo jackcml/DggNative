@@ -1,241 +1,315 @@
 using System;
-using System.Net;
+using System.IO;
 using System.Net.WebSockets;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Text;
-using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using DggNative.Models;
 
 namespace DggNative.Services;
 
-public class WebSocketChatService(ChatServerConfig config) : IChatService, IDisposable
+public sealed class WebSocketChatService : IChatService
 {
-    private readonly BehaviorSubject<ConnectionStatus> _connectionState = new(new ConnectionStatusDisconnected());
-    private ClientWebSocket? _webSocket;
-    private CancellationTokenSource _cancellationTokenSource = new();
+    public const int MaxOutboundBytes = 16 * 1024;
+
+    private readonly BehaviorSubject<ConnectionStatus> _connectionState =
+        new(new ConnectionStatusDisconnected());
     private readonly Subject<IWebSocketMessage> _messageSubject = new();
-    private int _retryAttempts;
+    private readonly SemaphoreSlim _controlGate = new(1, 1);
+    private readonly SemaphoreSlim _sendGate = new(1, 1);
+    private readonly object _settingsGate = new();
+    private readonly IChatWebSocketFactory _socketFactory;
+    private readonly TimeProvider _timeProvider;
+    private readonly IReconnectRandom _random;
+    private readonly IReconnectPolicy _reconnectPolicy;
+    private readonly Action<ChatConnectionFailure>? _failureSink;
+
+    private ChatServerConfig _config;
     private AuthCookies? _authCookies;
-    private Task? _connectTask;
-    private volatile ChatServerConfig _config = config;
+    private WorkerGeneration? _worker;
+    private IChatWebSocket? _activeSocket;
+    private bool _disposed;
+
+    public WebSocketChatService(ChatServerConfig config)
+        : this(config, new ChatWebSocketFactory(), TimeProvider.System, new SharedReconnectRandom()) { }
+
+    public WebSocketChatService(
+        ChatServerConfig config,
+        IChatWebSocketFactory socketFactory,
+        TimeProvider timeProvider,
+        IReconnectRandom random,
+        IReconnectPolicy? reconnectPolicy = null,
+        Action<ChatConnectionFailure>? failureSink = null)
+    {
+        _config = config;
+        _socketFactory = socketFactory;
+        _timeProvider = timeProvider;
+        _random = random;
+        _reconnectPolicy = reconnectPolicy ?? new DefaultReconnectPolicy();
+        _failureSink = failureSink ?? LogFailure;
+    }
 
     public IObservable<IWebSocketMessage> MessageStream => _messageSubject.AsObservable();
     public IObservable<ConnectionStatus> IsConnected => _connectionState.AsObservable();
 
-    public async Task ConnectAsync()
+    public async Task StartAsync(CancellationToken cancellationToken = default)
     {
-        while (!_cancellationTokenSource.IsCancellationRequested)
+        await _controlGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            try
-            {
-                _connectionState.OnNext(new ConnectionStatusConnecting());
+            ThrowIfDisposed();
+            if (_worker is { Task.IsCompleted: false }) return;
+            _worker = StartWorker();
+        }
+        finally { _controlGate.Release(); }
+    }
 
-                var config = _config;
+    public async Task<ConnectionAttemptResult> ReconnectAsync(CancellationToken cancellationToken = default)
+    {
+        Task<ConnectionAttemptResult> firstAttempt;
+        await _controlGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ThrowIfDisposed();
+            await StopWorkerAsync().ConfigureAwait(false);
+            _worker = StartWorker();
+            firstAttempt = _worker.FirstAttempt.Task;
+        }
+        finally { _controlGate.Release(); }
 
-                _webSocket?.Dispose();
-                _webSocket = new ClientWebSocket();
+        return await firstAttempt.WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
 
-                if (config.AuthMode == ChatAuthMode.Cookie)
-                {
-                    // Use externally-provided auth cookies, falling back to env vars
-                    var sid = _authCookies?.Sid ?? Environment.GetEnvironmentVariable("sid");
-                    var rememberme = _authCookies?.RememberMe ?? Environment.GetEnvironmentVariable("rememberme");
-
-                    if (!string.IsNullOrEmpty(sid) || !string.IsNullOrEmpty(rememberme))
-                    {
-                        var cookieContainer = new CookieContainer();
-
-                        if (!string.IsNullOrEmpty(sid))
-                            cookieContainer.Add(new Cookie("sid", sid, "/", config.ServerUri.Host));
-
-                        if (!string.IsNullOrEmpty(rememberme))
-                            cookieContainer.Add(new Cookie("rememberme", rememberme, "/", config.ServerUri.Host));
-
-                        _webSocket.Options.Cookies = cookieContainer;
-                    }
-
-                    _webSocket.Options.SetRequestHeader("Origin", "https://www.destiny.gg");
-                }
-
-                await _webSocket.ConnectAsync(config.ServerUri, _cancellationTokenSource.Token);
-
-                _connectionState.OnNext(new ConnectionStatusConnected());
-                _retryAttempts = 0;
-
-                if (config is { AuthMode: ChatAuthMode.Hello, HelloNick: not null })
-                {
-                    await SendMessageAsync(OutboundFrames.Hello(config.HelloNick), _cancellationTokenSource.Token);
-                }
-
-                await ReceiveLoopAsync(_cancellationTokenSource.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-            catch (Exception)
-            {
-                // Ignored, will retry
-            }
-
-            if (_cancellationTokenSource.IsCancellationRequested) break;
-
+    public async Task StopAsync(CancellationToken cancellationToken = default)
+    {
+        await _controlGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await StopWorkerAsync().ConfigureAwait(false);
             _connectionState.OnNext(new ConnectionStatusDisconnected());
-
-            // Backoff logic
-            var delayMs = _retryAttempts == 0
-                ? Random.Shared.Next(501, 3001)
-                : Random.Shared.Next(5000, 30001);
-
-            _retryAttempts++;
-
-            // Countdown loop
-            while (delayMs > 0)
-            {
-                _connectionState.OnNext(new ConnectionStatusRetrying(delayMs));
-
-                const int stepMs = 250;
-                await Task.Delay(Math.Min(stepMs, delayMs), _cancellationTokenSource.Token);
-                delayMs -= stepMs;
-
-                if (_cancellationTokenSource.IsCancellationRequested) break;
-            }
         }
+        finally { _controlGate.Release(); }
     }
 
-    private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
+    public async Task ConfigureAsync(ChatServerConfig config, CancellationToken cancellationToken = default)
     {
-        if (_webSocket == null) return;
-
-        var buffer = new byte[8192];
-        using var ms = new MemoryStream();
-
-        while (!cancellationToken.IsCancellationRequested && _webSocket.State == WebSocketState.Open)
+        ArgumentNullException.ThrowIfNull(config);
+        await _controlGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            WebSocketReceiveResult result;
-            try
-            {
-                result = await _webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
-            }
-            catch
-            {
-                break; // Connection failed
-            }
-
-            if (result.MessageType == WebSocketMessageType.Close)
-            {
-                if (_webSocket.CloseStatus == WebSocketCloseStatus.PolicyViolation)
-                {
-                    // The server rejected us (e.g. nick already in use). Drop the nick so the
-                    // reconnect loop falls back to anonymous instead of re-sending a rejected HELLO.
-                    _config = _config with { HelloNick = null };
-                    _connectionState.OnNext(
-                        new ConnectionStatusRejected(_webSocket.CloseStatusDescription ?? "Rejected by server"));
-                }
-
-                await _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, CancellationToken.None);
-                break;
-            }
-
-            if (result.MessageType != WebSocketMessageType.Text) continue;
-
-            ms.Write(buffer, 0, result.Count);
-
-            if (!result.EndOfMessage) continue;
-
-            ReadOnlySpan<byte> messageBytes = ms.ToArray().AsSpan();
-            ms.SetLength(0); // Reset for next message
-
-            var spaceIndex = messageBytes.IndexOf((byte)' ');
-            if (spaceIndex == -1) continue; // Invalid message format
-
-            var objectType = Encoding.UTF8.GetString(messageBytes[..spaceIndex]);
-
-            try
-            {
-                // Parse remaining buffer data (JSON) into corresponding IWebSocketMessage type
-                var message = WebSocketMessageFactory.Create(objectType, messageBytes[(spaceIndex + 1)..]);
-
-                // Push message into stream
-                if (message != null)
-                {
-                    _messageSubject.OnNext(message);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error parsing message: {ex.Message}");
-            }
+            ThrowIfDisposed();
+            lock (_settingsGate) _config = config;
         }
-    }
-
-    public async Task StartAsync()
-    {
-        _connectTask = ConnectAsync();
-        await _connectTask;
+        finally { _controlGate.Release(); }
     }
 
     public void SetAuthCookies(AuthCookies? cookies)
     {
-        _authCookies = cookies;
+        lock (_settingsGate) _authCookies = cookies;
     }
 
-    public void Configure(ChatServerConfig config)
+    public async Task<SendResult> SendMessageAsync(string message, CancellationToken cancellationToken = default)
     {
-        _config = config;
-    }
+        if (Encoding.UTF8.GetByteCount(message) > MaxOutboundBytes) return SendResult.TooLarge;
+        var bytes = Encoding.UTF8.GetBytes(message);
 
-    public async Task ReconnectAsync()
-    {
-        await DisconnectAsync();
-
-        // Wait for the previous ConnectAsync loop to fully exit
-        if (_connectTask != null)
+        await _sendGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            try { await _connectTask; }
-            catch { /* already handled */ }
-        }
-
-        _cancellationTokenSource = new CancellationTokenSource();
-        _connectTask = ConnectAsync();
-        await _connectTask;
-    }
-
-    public async Task DisconnectAsync()
-    {
-        await _cancellationTokenSource.CancelAsync();
-
-        if (_webSocket is { State: WebSocketState.Open })
-        {
+            var socket = Volatile.Read(ref _activeSocket);
+            if (socket is not { State: WebSocketState.Open }) return SendResult.NotReady;
             try
             {
-                await _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, CancellationToken.None);
+                await socket.SendAsync(bytes, WebSocketMessageType.Text, true, cancellationToken)
+                    .ConfigureAwait(false);
+                return SendResult.AcceptedForSend;
             }
-            catch
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception ex)
             {
-                // Ignore close errors
+                ReportFailure("send", ex);
+                return SendResult.Failed;
             }
+        }
+        finally { _sendGate.Release(); }
+    }
+
+    private WorkerGeneration StartWorker()
+    {
+        var cts = new CancellationTokenSource();
+        var firstAttempt = new TaskCompletionSource<ConnectionAttemptResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var task = RunWorkerAsync(cts.Token, firstAttempt);
+        return new WorkerGeneration(cts, task, firstAttempt);
+    }
+
+    private async Task RunWorkerAsync(
+        CancellationToken cancellationToken,
+        TaskCompletionSource<ConnectionAttemptResult> firstAttempt)
+    {
+        var retryAttempts = 0;
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                IChatWebSocket? socket = null;
+                try
+                {
+                    _connectionState.OnNext(new ConnectionStatusConnecting());
+                    ChatServerConfig config;
+                    AuthCookies? cookies;
+                    lock (_settingsGate) { config = _config; cookies = _authCookies; }
+
+                    socket = _socketFactory.Create(config, cookies);
+                    Volatile.Write(ref _activeSocket, socket);
+                    await socket.ConnectAsync(config.ServerUri, cancellationToken).ConfigureAwait(false);
+                    _connectionState.OnNext(new ConnectionStatusConnected());
+                    firstAttempt.TrySetResult(ConnectionAttemptResult.Connected);
+                    retryAttempts = 0;
+
+                    if (config is { AuthMode: ChatAuthMode.Hello, HelloNick: not null })
+                    {
+                        var hello = Encoding.UTF8.GetBytes(OutboundFrames.Hello(config.HelloNick));
+                        await SendOnSocketAsync(socket, hello, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    await ReceiveLoopAsync(socket, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
+                catch (Exception ex)
+                {
+                    firstAttempt.TrySetResult(ConnectionAttemptResult.Failed);
+                    ReportFailure("connection", ex);
+                }
+                finally
+                {
+                    Interlocked.CompareExchange(ref _activeSocket, null, socket);
+                    if (socket != null)
+                    {
+                        await _sendGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+                        try { socket.Dispose(); }
+                        finally { _sendGate.Release(); }
+                    }
+                }
+
+                if (cancellationToken.IsCancellationRequested) break;
+                _connectionState.OnNext(new ConnectionStatusDisconnected());
+                var delayMs = checked((int)_reconnectPolicy.GetDelay(retryAttempts, _random).TotalMilliseconds);
+                retryAttempts++;
+                await DelayWithCountdownAsync(delayMs, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        finally
+        {
+            firstAttempt.TrySetResult(ConnectionAttemptResult.Stopped);
         }
     }
 
-    public async Task SendMessageAsync(string message, CancellationToken cancellationToken)
+    private async Task ReceiveLoopAsync(IChatWebSocket socket, CancellationToken cancellationToken)
     {
-        if (_webSocket is not { State: WebSocketState.Open }) return;
-
-        var bytes = Encoding.UTF8.GetBytes(message);
-        await _webSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cancellationToken);
+        var buffer = new byte[8192];
+        using var stream = new MemoryStream();
+        while (!cancellationToken.IsCancellationRequested && socket.State == WebSocketState.Open)
+        {
+            var result = await socket.ReceiveAsync(buffer, cancellationToken).ConfigureAwait(false);
+            if (result.MessageType == WebSocketMessageType.Close)
+            {
+                if (socket.CloseStatus == WebSocketCloseStatus.PolicyViolation)
+                {
+                    lock (_settingsGate) _config = _config with { HelloNick = null };
+                    _connectionState.OnNext(new ConnectionStatusRejected(
+                        socket.CloseStatusDescription ?? "Rejected by server"));
+                }
+                try
+                {
+                    await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex) { ReportFailure("close", ex); }
+                return;
+            }
+            if (result.MessageType != WebSocketMessageType.Text) continue;
+            stream.Write(buffer, 0, result.Count);
+            if (!result.EndOfMessage) continue;
+            ParseMessage(stream.ToArray());
+            stream.SetLength(0);
+        }
     }
 
-    public void Dispose()
+    private void ParseMessage(byte[] bytes)
     {
-        GC.SuppressFinalize(this);
-        _cancellationTokenSource.Cancel();
-        _cancellationTokenSource.Dispose();
-        _webSocket?.Dispose();
+        var spaceIndex = Array.IndexOf(bytes, (byte)' ');
+        if (spaceIndex < 0) return;
+        var type = Encoding.UTF8.GetString(bytes.AsSpan(0, spaceIndex));
+        try
+        {
+            var message = WebSocketMessageFactory.Create(type, bytes.AsSpan(spaceIndex + 1));
+            if (message != null) _messageSubject.OnNext(message);
+        }
+        catch (Exception ex) { ReportFailure("parse", ex); }
+    }
+
+    private async Task DelayWithCountdownAsync(int delayMs, CancellationToken cancellationToken)
+    {
+        while (delayMs > 0)
+        {
+            _connectionState.OnNext(new ConnectionStatusRetrying(delayMs));
+            var step = Math.Min(250, delayMs);
+            await Task.Delay(TimeSpan.FromMilliseconds(step), _timeProvider, cancellationToken)
+                .ConfigureAwait(false);
+            delayMs -= step;
+        }
+    }
+
+    private async Task SendOnSocketAsync(IChatWebSocket socket, byte[] bytes, CancellationToken cancellationToken)
+    {
+        await _sendGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await socket.SendAsync(bytes, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
+        }
+        finally { _sendGate.Release(); }
+    }
+
+    private async Task StopWorkerAsync()
+    {
+        var worker = _worker;
+        _worker = null;
+        if (worker == null) return;
+        await worker.Cancellation.CancelAsync().ConfigureAwait(false);
+        await worker.Task.ConfigureAwait(false);
+        worker.Cancellation.Dispose();
+    }
+
+    private void ReportFailure(string operation, Exception exception) =>
+        _failureSink?.Invoke(new ChatConnectionFailure(operation, exception.GetType().Name, exception));
+
+    private static void LogFailure(ChatConnectionFailure failure) =>
+        Console.Error.WriteLine($"chat_connection_failure operation={failure.Operation} category={failure.Category}");
+
+    private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed) return;
+        await StopAsync().ConfigureAwait(false);
+        _disposed = true;
+        _messageSubject.OnCompleted();
+        _connectionState.OnCompleted();
         _messageSubject.Dispose();
         _connectionState.Dispose();
+        _controlGate.Dispose();
+        _sendGate.Dispose();
+        GC.SuppressFinalize(this);
     }
+
+    public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+    private sealed record WorkerGeneration(
+        CancellationTokenSource Cancellation,
+        Task Task,
+        TaskCompletionSource<ConnectionAttemptResult> FirstAttempt);
 }
