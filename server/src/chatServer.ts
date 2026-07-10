@@ -1,4 +1,5 @@
 import { WebSocket, WebSocketServer } from "ws";
+import type { AddressInfo } from "node:net";
 import {
   ChatMessagePayload,
   FrameType,
@@ -12,12 +13,44 @@ import {
   readHelloNick,
 } from "./protocol.js";
 
+// Valid native commands are currently at most a few KiB: HELLO has a 32-character
+// nick and MSG has 512 Unicode characters. 16 KiB also leaves compatibility room
+// for the currently accepted DGG-shaped MSG without permitting unbounded frames.
+export const MaxPayloadBytes = 16 * 1024;
+
+const CloseReason = {
+  BinaryFrame: "BINARY_NOT_SUPPORTED",
+  InvalidFrame: "INVALID_FRAME",
+  InvalidMessage: "INVALID_MESSAGE",
+  RepeatedHello: "HELLO_ALREADY_ACCEPTED",
+  IdentificationRequired: "IDENTIFICATION_REQUIRED",
+  NickInUse: "NICK_IN_USE",
+  PayloadTooLarge: "PAYLOAD_TOO_LARGE",
+  UnknownType: "UNKNOWN_FRAME_TYPE",
+} as const;
+
 export type ChatServerOptions = {
   host?: string;
   port: number;
   historyLimit?: number;
   onError?: (error: Error) => void;
+  onDebug?: (event: InboundRejection) => void;
 };
+
+export type InboundRejection = {
+  event: "inbound_rejected";
+  reason: string;
+  frameType?: string;
+};
+
+class InboundError extends Error {
+  constructor(
+    readonly reason: string,
+    readonly frameType?: string,
+  ) {
+    super(reason);
+  }
+}
 
 type Session = {
   socket: WebSocket;
@@ -34,7 +67,15 @@ export class ChatServer {
 
   constructor(private readonly options: ChatServerOptions) {
     this.historyLimit = options.historyLimit ?? 500;
-    this.wss = new WebSocketServer({ host: options.host ?? "127.0.0.1", port: options.port });
+    if (!Number.isFinite(this.historyLimit) || !Number.isInteger(this.historyLimit) || this.historyLimit < 0) {
+      throw new Error("historyLimit must be a finite, non-negative integer.");
+    }
+
+    this.wss = new WebSocketServer({
+      host: options.host ?? "127.0.0.1",
+      port: options.port,
+      maxPayload: MaxPayloadBytes,
+    });
     this.wss.on("error", (error) => {
       console.error("WebSocket server error:", error);
       this.options.onError?.(error);
@@ -51,9 +92,20 @@ export class ChatServer {
     });
   }
 
+  async listeningPort(): Promise<number> {
+    const currentAddress = this.wss.address();
+    if (currentAddress) return (currentAddress as AddressInfo).port;
+
+    await new Promise<void>((resolve, reject) => {
+      this.wss.once("listening", resolve);
+      this.wss.once("error", reject);
+    });
+    return (this.wss.address() as AddressInfo).port;
+  }
+
   close(): Promise<void> {
     for (const client of this.wss.clients) {
-      client.close(1001, "Server shutting down.");
+      this.safeClose(client, 1001, "SERVER_SHUTDOWN");
     }
 
     return new Promise((resolve, reject) => {
@@ -65,52 +117,75 @@ export class ChatServer {
   }
 
   private handleConnection(socket: WebSocket): void {
-    socket.on("message", (data) => {
+    socket.on("message", (data, isBinary) => {
+      if (isBinary) {
+        this.reject(socket, new InboundError(CloseReason.BinaryFrame));
+        return;
+      }
+
       try {
         this.handleFrame(socket, data.toString("utf8"));
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Invalid frame.";
-        socket.close(1008, message);
+        this.reject(
+          socket,
+          error instanceof InboundError ? error : new InboundError(CloseReason.InvalidFrame),
+        );
       }
     });
 
     socket.on("close", () => this.handleClose(socket));
     socket.on("error", (error) => {
-      console.error("WebSocket error:", error);
+      if ((error as NodeJS.ErrnoException).code === "WS_ERR_UNSUPPORTED_MESSAGE_LENGTH") {
+        this.debugRejection(CloseReason.PayloadTooLarge);
+        return;
+      }
+      this.options.onError?.(error);
     });
   }
 
   private handleFrame(socket: WebSocket, rawFrame: string): void {
-    const frame = parseFrame(rawFrame);
+    let frame;
+    try {
+      frame = parseFrame(rawFrame);
+    } catch {
+      throw new InboundError(CloseReason.InvalidFrame);
+    }
+
+    if (frame.type !== "HELLO" && frame.type !== "MSG") {
+      throw new InboundError(CloseReason.UnknownType, frame.type);
+    }
 
     if (frame.type === "HELLO") {
-      this.handleHello(socket, frame.payload);
+      try {
+        this.handleHello(socket, frame.payload);
+      } catch (error) {
+        if (error instanceof InboundError) throw error;
+        throw new InboundError(CloseReason.InvalidMessage, frame.type);
+      }
       return;
     }
 
     const session = this.sessions.get(socket);
     if (!session) {
-      throw new Error("Send HELLO before other frames.");
+      throw new InboundError(CloseReason.IdentificationRequired, frame.type);
     }
 
-    switch (frame.type) {
-      case "MSG":
-        this.handleMessage(session, frame.payload);
-        break;
-      default:
-        throw new Error(`Unsupported inbound frame type: ${frame.type}.`);
+    try {
+      this.handleMessage(session, frame.payload);
+    } catch {
+      throw new InboundError(CloseReason.InvalidMessage, frame.type);
     }
   }
 
   private handleHello(socket: WebSocket, payload: unknown): void {
     if (this.sessions.has(socket)) {
-      throw new Error("HELLO was already accepted for this connection.");
+      throw new InboundError(CloseReason.RepeatedHello, "HELLO");
     }
 
     const nick = readHelloNick(payload);
     const normalizedNick = nick.toLowerCase();
     if (this.nicks.has(normalizedNick)) {
-      throw new Error(`Nick is already in use: ${nick}.`);
+      throw new InboundError(CloseReason.NickInUse, "HELLO");
     }
 
     const session: Session = {
@@ -151,6 +226,29 @@ export class ChatServer {
     this.sessions.delete(socket);
     this.nicks.delete(session.user.nick.toLowerCase());
     this.broadcast("QUIT", this.createPresencePayload(session.user));
+  }
+
+  private reject(socket: WebSocket, error: InboundError): void {
+    this.debugRejection(error.reason, error.frameType);
+    this.safeClose(socket, 1008, error.reason);
+  }
+
+  private debugRejection(reason: string, frameType?: string): void {
+    this.options.onDebug?.({
+      event: "inbound_rejected",
+      reason,
+      // Keep diagnostics useful but bounded even for attacker-controlled types.
+      ...(frameType ? { frameType: frameType.slice(0, 16) } : {}),
+    });
+  }
+
+  private safeClose(socket: WebSocket, code: number, reason: string): void {
+    try {
+      socket.close(code, reason);
+    } catch (error) {
+      this.options.onError?.(error instanceof Error ? error : new Error("WebSocket close failed."));
+      socket.terminate();
+    }
   }
 
   private createNamesPayload(): NamesPayload {

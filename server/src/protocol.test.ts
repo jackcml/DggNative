@@ -1,11 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createUser, formatFrame, parseFrame, readChatData, readHelloNick } from "./protocol.js";
+import {
+  MaxFrameTypeLength,
+  createUser,
+  formatFrame,
+  parseFrame,
+  readChatData,
+  readHelloNick,
+} from "./protocol.js";
 
 test("formats and parses TYPE json frames", () => {
   const frame = formatFrame("MSG", { data: "hello" });
   assert.equal(frame, 'MSG {"data":"hello"}');
   assert.deepEqual(parseFrame(frame), { type: "MSG", payload: { data: "hello" } });
+});
+
+test("bounds frame types before dispatch", () => {
+  assert.throws(() => parseFrame(`${"X".repeat(MaxFrameTypeLength + 1)} {}`), /cannot exceed/);
 });
 
 test("validates hello nick claims", () => {

@@ -56,6 +56,8 @@ export type ParsedFrame = {
   payload: unknown;
 };
 
+export const MaxFrameTypeLength = 16;
+
 const NickPattern = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,31}$/;
 
 export const HelloPayloadSchema = z.object({
@@ -84,6 +86,10 @@ export function parseFrame(input: string): ParsedFrame {
   }
 
   const type = input.slice(0, spaceIndex);
+  if (type.length > MaxFrameTypeLength) {
+    throw new Error(`Frame type cannot exceed ${MaxFrameTypeLength} characters.`);
+  }
+
   const json = input.slice(spaceIndex + 1);
   if (!type || !json) {
     throw new Error("Frame type and JSON payload are required.");
