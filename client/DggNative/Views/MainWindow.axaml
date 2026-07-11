@@ -79,8 +79,16 @@
                 BorderBrush="{DynamicResource ChatInputBorderBrush}"
                 BorderThickness="0 1 0 0"
                 Padding="8">
-            <Grid ColumnDefinitions="*,Auto">
-                <Panel Grid.Column="0">
+            <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="*,Auto">
+                <TextBlock Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2"
+                           Text="{Binding ConfigurationError}"
+                           Foreground="Red" TextWrapping="Wrap" Margin="0,0,0,4"
+                           IsVisible="{Binding ConfigurationError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+                           Text="{Binding SecurityError}"
+                           Foreground="Orange" TextWrapping="Wrap" Margin="0,0,0,4"
+                           IsVisible="{Binding SecurityError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                <Panel Grid.Row="2" Grid.Column="0">
                     <!-- Login button when not authenticated (official server) -->
                     <Button Name="LoginButton"
                             Content="Login to chat"
@@ -132,7 +140,7 @@
                     </Grid>
                 </Panel>
 
-                <Button Grid.Column="1"
+                <Button Grid.Row="2" Grid.Column="1"
                         Name="SettingsButton"
                         Content="⚙"
                         Click="SettingsButton_OnClick"

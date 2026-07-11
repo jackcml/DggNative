@@ -29,6 +29,10 @@ public sealed class ChatWebSocketFactory : IChatWebSocketFactory
 {
     public IChatWebSocket Create(ChatServerConfig config, AuthCookies? cookies)
     {
+        if (config.AuthMode == ChatAuthMode.Cookie
+            && !EndpointTrust.IsApprovedOfficialChatEndpoint(config.ServerUri))
+            throw new InvalidOperationException("Cookie authentication is restricted to the approved official wss:// endpoint.");
+
         var socket = new ClientWebSocket();
         if (config.AuthMode == ChatAuthMode.Cookie)
         {

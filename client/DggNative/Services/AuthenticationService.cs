@@ -18,6 +18,41 @@ public class AuthenticationService : IDisposable
     private CefLoginWindow? _activeLoginWindow;
     private bool _isDisposed;
 
+    public Task ClearOfficialSessionAsync()
+    {
+        if (!CefRuntime.IsInitialized) return Task.CompletedTask;
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        void ClearOnUiThread()
+        {
+            try
+            {
+                var manager = CefCookieManager.GetGlobal(null);
+                var accepted = manager.DeleteCookies(
+                    string.Empty,
+                    string.Empty,
+                    new DeleteCookiesCallback(() => completion.TrySetResult()));
+                if (!accepted)
+                    completion.TrySetException(new InvalidOperationException(
+                        "The embedded browser refused to clear its session cookies."));
+            }
+            catch (Exception ex)
+            {
+                completion.TrySetException(new InvalidOperationException(
+                    "The embedded browser session could not be cleared.", ex));
+            }
+        }
+
+        if (Dispatcher.UIThread.CheckAccess()) ClearOnUiThread();
+        else Dispatcher.UIThread.Post(ClearOnUiThread);
+        return completion.Task;
+    }
+
+    private sealed class DeleteCookiesCallback(Action completed) : CefDeleteCookiesCallback
+    {
+        protected override void OnComplete(int numDeleted) => completed();
+    }
+
     public async Task<AuthCookies?> LoginAsync(Window owner)
     {
         try
@@ -253,7 +288,7 @@ public class AuthenticationService : IDisposable
         private static bool IsDestinyHost(string? url)
         {
             return Uri.TryCreate(url, UriKind.Absolute, out var uri)
-                   && uri.Host.EndsWith("destiny.gg", StringComparison.OrdinalIgnoreCase);
+                   && EndpointTrust.IsHostOrSubdomain(uri.Host, "destiny.gg");
         }
 
         private static string[] GetHeaderValues(NameValueCollection headers, string name)

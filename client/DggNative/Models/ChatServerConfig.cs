@@ -19,17 +19,23 @@ public record ChatServerConfig(Uri ServerUri, ChatAuthMode AuthMode, string? Hel
 
     /// <summary>
     /// Computes the effective server config. The wsurl env var wins when set (developer
-    /// escape hatch), otherwise the persisted settings; unparseable URLs fall back to official.
+    /// escape hatch), otherwise the persisted settings. Invalid requested URLs are errors and
+    /// never silently switch the application to another trust domain.
     /// </summary>
     public static ChatServerConfig Resolve(string? envUrl, AppSettings settings)
     {
-        if (!string.IsNullOrWhiteSpace(envUrl) && TryParseWsUri(envUrl, out var envUri))
+        if (!string.IsNullOrWhiteSpace(envUrl))
         {
-            return new ChatServerConfig(envUri, AuthModeForHost(envUri));
+            if (!TryParseWsUri(envUrl, out var envUri))
+                throw new ChatServerConfigurationException("The wsurl environment variable is not a valid ws:// or wss:// URL.");
+            return new ChatServerConfig(envUri,
+                EndpointTrust.IsApprovedOfficialChatEndpoint(envUri) ? ChatAuthMode.Cookie : ChatAuthMode.Hello);
         }
 
-        if (settings.ServerKind == ServerKind.Custom && TryParseWsUri(settings.CustomServerUrl, out var customUri))
+        if (settings.ServerKind == ServerKind.Custom)
         {
+            if (!TryParseWsUri(settings.CustomServerUrl, out var customUri))
+                throw new ChatServerConfigurationException("The configured custom server URL is invalid.");
             return new ChatServerConfig(customUri, ChatAuthMode.Hello);
         }
 
@@ -49,12 +55,6 @@ public record ChatServerConfig(Uri ServerUri, ChatAuthMode AuthMode, string? Hel
         return false;
     }
 
-    private static ChatAuthMode AuthModeForHost(Uri uri)
-    {
-        var host = uri.Host;
-        return host.Equals("destiny.gg", StringComparison.OrdinalIgnoreCase)
-               || host.EndsWith(".destiny.gg", StringComparison.OrdinalIgnoreCase)
-            ? ChatAuthMode.Cookie
-            : ChatAuthMode.Hello;
-    }
 }
+
+public sealed class ChatServerConfigurationException(string message) : Exception(message);

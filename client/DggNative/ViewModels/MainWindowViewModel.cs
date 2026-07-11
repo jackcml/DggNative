@@ -21,7 +21,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly IChatService _chatService;
     private readonly CompositeDisposable _subscriptions = new();
     private readonly AuthenticationService _authService;
-    private readonly CookiePersistenceService _cookiePersistence;
+    private readonly CredentialPersistenceService _credentialPersistence;
     private readonly SettingsPersistenceService _settingsPersistence;
     private readonly IDesktopNotificationService _desktopNotifications;
 
@@ -54,6 +54,10 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
     [ObservableProperty] private string? _sendError;
 
+    [ObservableProperty] private string? _securityError;
+
+    [ObservableProperty] private string? _configurationError;
+
     [ObservableProperty] private bool _isWindowFocused = true;
 
     public bool IsLoggedIn => SessionState is ChatSessionReady;
@@ -82,13 +86,13 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     public MainWindowViewModel(
         IChatService chatService,
         AuthenticationService authService,
-        CookiePersistenceService cookiePersistence,
+        CredentialPersistenceService credentialPersistence,
         SettingsPersistenceService settingsPersistence,
         IDesktopNotificationService desktopNotifications)
     {
         _chatService = chatService;
         _authService = authService;
-        _cookiePersistence = cookiePersistence;
+        _credentialPersistence = credentialPersistence;
         _settingsPersistence = settingsPersistence;
         _desktopNotifications = desktopNotifications;
         _desktopNotifications.NotificationActivated += (_, _) =>
@@ -144,27 +148,36 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         // Resolve the server config and persisted credentials, then connect
         Task.Run(async () =>
         {
-            _settings = await _settingsPersistence.LoadAsync() ?? new AppSettings();
-            _config = ChatServerConfig.Resolve(Environment.GetEnvironmentVariable("wsurl"), _settings);
-
-            Dispatcher.UIThread.Post(() =>
+            try
             {
-                IsCustomServer = _config.AuthMode == ChatAuthMode.Hello;
-                NickInput = _settings.Nick ?? string.Empty;
-            });
+                _settings = await _settingsPersistence.LoadAsync() ?? new AppSettings();
+                _config = ChatServerConfig.Resolve(Environment.GetEnvironmentVariable("wsurl"), _settings);
 
-            if (_config.AuthMode == ChatAuthMode.Cookie)
-            {
-                var saved = await _cookiePersistence.LoadAsync();
-                if (saved is { HasCredentials: true })
+                Dispatcher.UIThread.Post(() =>
                 {
-                    _chatService.SetAuthCookies(saved);
-                    Dispatcher.UIThread.Post(() => CredentialsAvailable = true);
-                }
-            }
+                    IsCustomServer = _config.AuthMode == ChatAuthMode.Hello;
+                    NickInput = _settings.Nick ?? string.Empty;
+                    ConfigurationError = null;
+                });
 
-            await _chatService.ConfigureAsync(_config);
-            await chatService.StartAsync();
+                if (_config.AuthMode == ChatAuthMode.Cookie)
+                {
+                    var load = await _credentialPersistence.LoadAsync();
+                    Dispatcher.UIThread.Post(() => SecurityError = load.Error);
+                    if (load.Credentials is { HasCredentials: true } saved)
+                    {
+                        _chatService.SetAuthCookies(saved);
+                        Dispatcher.UIThread.Post(() => CredentialsAvailable = true);
+                    }
+                }
+
+                await _chatService.ConfigureAsync(_config);
+                await chatService.StartAsync();
+            }
+            catch (ChatServerConfigurationException ex)
+            {
+                Dispatcher.UIThread.Post(() => ConfigurationError = ex.Message);
+            }
         });
     }
 
@@ -173,7 +186,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         _chatService = null!;
         _authService = null!;
-        _cookiePersistence = null!;
+        _credentialPersistence = null!;
         _settingsPersistence = null!;
         _desktopNotifications = null!;
     }
@@ -186,7 +199,8 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
         _chatService.SetAuthCookies(cookies);
         CredentialsAvailable = true;
-        await _cookiePersistence.SaveAsync(cookies);
+        var save = await _credentialPersistence.SaveAsync(cookies);
+        SecurityError = save.Error;
 
         // Reconnect with the new credentials
         await _chatService.ReconnectAsync();
@@ -204,7 +218,16 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         else
         {
             _chatService.SetAuthCookies(null);
-            _cookiePersistence.Clear();
+            var cleared = await _credentialPersistence.ClearAsync();
+            SecurityError = cleared.Error;
+            try
+            {
+                await _authService.ClearOfficialSessionAsync();
+            }
+            catch (Exception ex)
+            {
+                SecurityError = ex.Message;
+            }
         }
 
         LocalUser = null;
@@ -248,7 +271,17 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         _settings = result;
         await _settingsPersistence.SaveAsync(_settings);
 
-        var newConfig = ChatServerConfig.Resolve(Environment.GetEnvironmentVariable("wsurl"), _settings);
+        ChatServerConfig newConfig;
+        try
+        {
+            newConfig = ChatServerConfig.Resolve(Environment.GetEnvironmentVariable("wsurl"), _settings);
+            ConfigurationError = null;
+        }
+        catch (ChatServerConfigurationException ex)
+        {
+            ConfigurationError = ex.Message;
+            return;
+        }
         if (newConfig.ServerUri == _config.ServerUri && newConfig.AuthMode == _config.AuthMode) return;
 
         _config = newConfig;
@@ -260,8 +293,9 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
         if (_config.AuthMode == ChatAuthMode.Cookie)
         {
-            var saved = await _cookiePersistence.LoadAsync();
-            if (saved is { HasCredentials: true })
+            var load = await _credentialPersistence.LoadAsync();
+            SecurityError = load.Error;
+            if (load.Credentials is { HasCredentials: true } saved)
             {
                 _chatService.SetAuthCookies(saved);
                 CredentialsAvailable = true;

@@ -37,7 +37,7 @@ sealed class Program
         CefRuntimeLoader.Initialize(
             new CefSettings
             {
-                CachePath = Path.Combine(cefRoot, "profile"),
+                // No CachePath: browser cookies and login state are session-only.
                 RootCachePath = cefRoot,
                 WindowlessRenderingEnabled = false
             },

@@ -25,14 +25,15 @@ public partial class App : Application
             var chatService = new WebSocketChatService(
                 new ChatServerConfig(ChatServerConfig.OfficialUri, ChatAuthMode.Cookie));
             var authenticationService = new AuthenticationService();
-            var cookiePersistenceService = new CookiePersistenceService();
+            var credentialPersistenceService = new CredentialPersistenceService(
+                CredentialStoreFactory.CreateDefault());
             var settingsPersistenceService = new SettingsPersistenceService();
             var desktopNotificationService = new DesktopNotificationService();
 
             var mainViewModel = new MainWindowViewModel(
                 chatService,
                 authenticationService,
-                cookiePersistenceService,
+                credentialPersistenceService,
                 settingsPersistenceService,
                 desktopNotificationService);
             desktop.MainWindow = new MainWindow

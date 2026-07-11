@@ -236,6 +236,39 @@ public class WebSocketChatServiceTest
         Assert.Equal("jack", factory.Configs.Single().HelloNick);
     }
 
+    [Fact]
+    public async Task NativeLogoutReleasesGenerationAndContinuesAsGuest()
+    {
+        var factory = new FakeSocketFactory();
+        await using var service = CreateService(factory, Config with { HelloNick = "jack" });
+        await service.ReconnectAsync();
+        Assert.IsType<ChatSessionAuthenticating>(await service.SessionState.FirstAsync());
+
+        await service.ConfigureAsync(Config with { HelloNick = null });
+        await service.ReconnectAsync();
+
+        Assert.True(factory.Sockets[0].Disposed);
+        Assert.Null(factory.Configs[^1].HelloNick);
+        Assert.IsType<ChatSessionGuest>(await service.SessionState.FirstAsync());
+    }
+
+    [Fact]
+    public async Task OfficialLogoutRemovesCookiesFromTheNextConnectionGeneration()
+    {
+        var factory = new FakeSocketFactory();
+        var official = new ChatServerConfig(ChatServerConfig.OfficialUri, ChatAuthMode.Cookie);
+        await using var service = CreateService(factory, official);
+        var credentials = new AuthCookies("sid", "remember");
+        service.SetAuthCookies(credentials);
+        await service.ReconnectAsync();
+        Assert.Equal(credentials, factory.Cookies.Single());
+
+        service.SetAuthCookies(null);
+        await service.ReconnectAsync();
+
+        Assert.Null(factory.Cookies[^1]);
+    }
+
     private static WebSocketChatService CreateService(
         FakeSocketFactory factory, ChatServerConfig? config = null) =>
         new(config ?? Config, factory, new BlockingTimeProvider(), new FixedRandom());
@@ -249,6 +282,7 @@ public class WebSocketChatServiceTest
     {
         public List<FakeSocket> Sockets { get; } = [];
         public List<ChatServerConfig> Configs { get; } = [];
+        public List<AuthCookies?> Cookies { get; } = [];
         public TaskCompletionSource CreatedSignal { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         public bool FailConnect { get; init; }
@@ -258,7 +292,7 @@ public class WebSocketChatServiceTest
         public IChatWebSocket Create(ChatServerConfig config, AuthCookies? cookies)
         {
             var socket = new FakeSocket(FailConnect, BlockConnect, BlockSend);
-            lock (Sockets) { Sockets.Add(socket); Configs.Add(config); }
+            lock (Sockets) { Sockets.Add(socket); Configs.Add(config); Cookies.Add(cookies); }
             CreatedSignal.TrySetResult();
             return socket;
         }
